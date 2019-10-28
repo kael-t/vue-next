@@ -18,7 +18,9 @@ export interface WritableComputedOptions<T> {
   set: ComputedSetter<T>
 }
 
+// 这个是computed是函数时的方法, 如果是方法的话, 返回值是ComputedRef
 export function computed<T>(getter: ComputedGetter<T>): ComputedRef<T>
+// 这个是当computed是对象时的方法, 如果是对象的话, 返回值是WritableComputedOptions, 因为有可能有setter, writeable
 export function computed<T>(
   options: WritableComputedOptions<T>
 ): WritableComputedRef<T>
@@ -28,6 +30,8 @@ export function computed<T>(
   let getter: ComputedGetter<T>
   let setter: ComputedSetter<T>
 
+  // 如果getterOrOptions是function的话, 直接把这个function作为getter, setter提示错误或者设为空方法
+  // 如果不是function的话, 就把getterOrOptions.get set分别作为getter和setter
   if (isFunction(getterOrOptions)) {
     getter = getterOrOptions
     setter = __DEV__
@@ -40,13 +44,20 @@ export function computed<T>(
     setter = getterOrOptions.set
   }
 
+  // 标识是否已经修改过但未求值
   let dirty = true
   let value: T
 
+  // 因为是lazy=true, 所以这里并不会立即计算
   const runner = effect(getter, {
+    // 延迟计算
     lazy: true,
     // mark effect as computed so that it gets priority during trigger
+    // 标识为computed来确定触发时候的优先级
     computed: true,
+    // 调度函数, 所有跟这个computed有关的依赖变更, 最后都会调用一次这个方法
+    // 使得这个computed的dirty=true, 然后每次调用computed的getter时检测dirty
+    // 一旦dirty为true, 则调用getter更新computed的值, computed的求值是惰性的, 跟vue2.x一致
     scheduler: () => {
       dirty = true
     }
@@ -57,6 +68,8 @@ export function computed<T>(
     effect: runner,
     get value() {
       if (dirty) {
+        // 这里调用runner, 实际上就是通过一系列调度后调用getter
+        // 所以这个value其实是调用getter后的值
         value = runner()
         dirty = false
       }

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Document</title>
+  <script src="./packages/vue/dist/vue.global.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    console.log(Vue);
+    const App = {
+      template: `
+        <p>{{count}} {{}}</p>
+        <button @click="handleClick">+1</button>
+        <span>{{obj.b}}</span>
+      `,
+      data() {
+        return {
+          count: 0,
+          obj: {
+            a: 1,
+            b: 2,
+          }
+        }
+      },
+      setup() {
+        let dummy
+        const map = Vue.reactive(new Map())
+        Vue.effect(() => (dummy = map.customProp))
+        map.customProp = 'Hello World'
+        console.log(map)
+      },
+      computed: {
+        test1 () {
+          return this.count++;
+        }
+      },
+      methods: {
+        handleClick() {
+          this.count += 1;
+        }
+      }
+    }
+    let vm = Vue.createApp().mount(App, '#app')
+  </script>
+</body>
+</html>

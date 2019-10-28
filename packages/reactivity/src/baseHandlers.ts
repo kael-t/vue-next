@@ -6,21 +6,47 @@ import { isObject, hasOwn, isSymbol, hasChanged } from '@vue/shared'
 import { isRef } from './ref'
 
 const builtInSymbols = new Set(
+  // 获取Symbol的原型链上, 类型为Symbol的属性
+  // 最后出来的是
+  // 0: Symbol(Symbol.asyncIterator)
+  // 1: Symbol(Symbol.hasInstance)
+  // 2: Symbol(Symbol.isConcatSpreadable)
+  // 3: Symbol(Symbol.iterator)
+  // 4: Symbol(Symbol.match)
+  // 5: Symbol(Symbol.matchAll)
+  // 6: Symbol(Symbol.replace)
+  // 7: Symbol(Symbol.search)
+  // 8: Symbol(Symbol.species)
+  // 9: Symbol(Symbol.split)
+  // 10: Symbol(Symbol.toPrimitive)
+  // 11: Symbol(Symbol.toStringTag)
+  // 12: Symbol(Symbol.unscopables
   Object.getOwnPropertyNames(Symbol)
     .map(key => (Symbol as any)[key])
     .filter(isSymbol)
 )
 
+/**
+ * 创建getter
+ * @param isReadonly 是否为只读
+ */
 function createGetter(isReadonly: boolean) {
   return function get(target: object, key: string | symbol, receiver: object) {
+    // Reflect处理完以后会返回内层的对象
     const res = Reflect.get(target, key, receiver)
+    // 如果key的类型是symbol且key为内置的symbol, 则不做其他处理, 直接返回res
     if (isSymbol(key) && builtInSymbols.has(key)) {
       return res
     }
+    // 判断是否为Ref对象, 是的话直接返回它的value值
+    // Ref已经是一个响应式对象了, 不需要再proxy
     if (isRef(res)) {
       return res.value
     }
+    // 收集target的依赖, 跟踪target的变化, 一旦target发生变化, target的Deps就会知道
     track(target, OperationTypes.GET, key)
+    // 如果内层对象是对象类型就判断是否是readonly的, 是readonly的话做readonly处理, 否则做reactive处理(对内层对象做递归处理)
+    // 不是对象就直接返回原值
     return isObject(res)
       ? isReadonly
         ? // need to lazy access readonly and reactive here to avoid
@@ -37,12 +63,17 @@ function set(
   value: unknown,
   receiver: object
 ): boolean {
+  // 获取原值
   value = toRaw(value)
+  // 缓存旧值
   const oldValue = (target as any)[key]
+  // 如果旧值是Ref类型的且新值不是ref类型的, 就把新值赋值给旧值的value属性
   if (isRef(oldValue) && !isRef(value)) {
     oldValue.value = value
     return true
   }
+  // 判断target是否已经有当前的key
+  // 通过判断key是否存在来区分这次操作是新增还是修改
   const hadKey = hasOwn(target, key)
   const result = Reflect.set(target, key, value, receiver)
   // don't trigger if target is something up in the prototype chain of original
