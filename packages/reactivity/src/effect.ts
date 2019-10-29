@@ -4,24 +4,41 @@ import { EMPTY_OBJ, extend } from '@vue/shared'
 
 // 定义响应作用接口
 export interface ReactiveEffect<T = any> {
+  // 代表这是一个函数类型，不接受入参，返回结果类型为泛型T
+  // T也即是原始函数的返回结果类型
   (): T
+  // 是否为effect的标志
   _isEffect: true
   active: boolean
+  // 监听函数的原始函数
   raw: () => T
+  // 暂时未知，根据名字来看是存一些依赖
+  // 根据类型来看，存放是二维集合数据，一维是数组，二维是ReactiveEffect的Set集合
   deps: Array<Dep>
+  // 是否是computed数据依赖的监听函数
   computed?: boolean
+  // 调度器函数，接受的入参run即是传给effect的函数，如果传了scheduler，则可通过其调用监听函数。
   scheduler?: (run: Function) => void
+  // 调试用, 在依赖收集(getter)时会被调用
   onTrack?: (event: DebuggerEvent) => void
+  // 调试用, 在触发更新(setter)时会被调用
   onTrigger?: (event: DebuggerEvent) => void
+  //通过 `stop` 终止监听函数时触发的事件。
   onStop?: () => void
 }
 
 export interface ReactiveEffectOptions {
+  // 是否延迟计算
   lazy?: boolean
+  // 是否计算属性
   computed?: boolean
+  // 调度器函数，接受的入参run即是传给effect的函数，如果传了scheduler，则可通过其调用监听函数。
   scheduler?: (run: Function) => void
+  // 调试用, 在依赖收集(getter)时会被调用
   onTrack?: (event: DebuggerEvent) => void
+  // 调试用, 在触发更新(setter)时会被调用
   onTrigger?: (event: DebuggerEvent) => void
+  //通过 `stop` 终止监听函数时触发的事件。
   onStop?: () => void
 }
 
@@ -40,27 +57,42 @@ export interface DebuggerEventExtraInfo {
 
 export const effectStack: ReactiveEffect[] = []
 
+// 迭代行为标识符
 export const ITERATE_KEY = Symbol('iterate')
 
+// 通过判断是否设置了_isEffect来判断当前的fn是否为一个effect
 export function isEffect(fn: any): fn is ReactiveEffect {
   return fn != null && fn._isEffect === true
 }
 
+// 生成监听函数的方法
 export function effect<T = any>(
+  // 原始方法
   fn: () => T,
+  // 配置项
   options: ReactiveEffectOptions = EMPTY_OBJ
 ): ReactiveEffect<T> {
+  // 判断是否已经是监听方法了, 是的话取fn.raw作为原始方法
   if (isEffect(fn)) {
     fn = fn.raw
   }
+  // 创建监听函数
   const effect = createReactiveEffect(fn, options)
+  // 如果没有设置lazy=false(不是惰性求值)的话, 直接调用一次
   if (!options.lazy) {
     effect()
   }
+  // 返回监听方法
   return effect
 }
 
+/**
+ * 停止对监听函数的监听, 也就是把监听函数的依赖表全部清除掉
+ * 所以函数内的依赖变化不会再通知这个函数, 所以函数不会被调用了
+ * @param effect 监听函数
+ */
 export function stop(effect: ReactiveEffect) {
+  // 如果active为true，则触发effect.onStop，并且把active置为false。
   if (effect.active) {
     // 清空effect的依赖表
     cleanup(effect)
@@ -73,13 +105,16 @@ export function stop(effect: ReactiveEffect) {
   }
 }
 
+// 创建监听函数的方法
 function createReactiveEffect<T = any>(
   fn: () => T,
   options: ReactiveEffectOptions
 ): ReactiveEffect<T> {
+  // 创建监听函数，通过run来包裹原始函数，做额外操作
   const effect = function reactiveEffect(...args: unknown[]): unknown {
     return run(effect, fn, args)
   } as ReactiveEffect
+  // 添加一系列的属性
   effect._isEffect = true
   effect.active = true
   effect.raw = fn
@@ -92,21 +127,30 @@ function createReactiveEffect<T = any>(
   return effect
 }
 
+// 监听函数的执行器
 function run(effect: ReactiveEffect, fn: Function, args: unknown[]): unknown {
+  // 如果监听函数不是active的, 执行监听的原始方法并返回结果
   if (!effect.active) {
     return fn(...args)
   }
+  // 如果监听函数是active的且在监听函数栈内不存在相同的方法的话
+  // 先清空监听函数, 防止递归调用造成循环
   if (!effectStack.includes(effect)) {
     cleanup(effect)
     try {
+      // 把监听函数放进栈内, 且直接原始方法
       effectStack.push(effect)
+      // 这里调用fn(effect的原始方法), 会触发原始方法里面引用的的变量的getter
+      // 进而会进入到track(这里可以配合track函数看), 也就能给effect原始函数来收集依赖
       return fn(...args)
     } finally {
+      // 无论是否报错都要把刚刚入栈的effect弹出
       effectStack.pop()
     }
   }
 }
 
+// 传递一个监听函数, 把监听函数的依赖都清空
 function cleanup(effect: ReactiveEffect) {
   const { deps } = effect
   // 清空依赖
@@ -130,12 +174,14 @@ export function resumeTracking() {
 }
 
 export function track(target: object, type: OperationTypes, key?: unknown) {
-  // 如果开关被关闭了, 不进行依赖收集
+  // 如果开关被关闭了, 或者监听函数中不存在元素, 不进行依赖收集
   if (!shouldTrack || effectStack.length === 0) {
     return
   }
-  // TODO: 为什么要取最后一个??? 触发get???? 应该不是吧?? effectStack应该并不是一个reactive对象
+  // 这里去最后一个是因为, 看run函数(执行器的逻辑), 会把target的依赖压到effectStack栈顶
+  // 此时的栈顶(也就是数组的最后一个元素), 就正好是当前的effect原始函数, 此时就收集了函数内变量的依赖了
   const effect = effectStack[effectStack.length - 1]
+  // 迭代操作重新设置一下key
   if (type === OperationTypes.ITERATE) {
     key = ITERATE_KEY
   }
@@ -183,9 +229,11 @@ export function trigger(
     // never been tracked
     return
   }
+  // 声明两个集合, 一个是普通的effects的, 一个是computed的
   const effects = new Set<ReactiveEffect>()
   const computedRunners = new Set<ReactiveEffect>()
   // 如果是清空操作的话, 需要触发所有的依赖
+  // addRunners并未执行监听函数，而是将其推到一个执行队列中，待后续执行
   if (type === OperationTypes.CLEAR) {
     // collection being cleared, trigger all effects for target
     depsMap.forEach(dep => {
@@ -193,10 +241,26 @@ export function trigger(
     })
   } else {
     // schedule runs for SET | ADD | DELETE
+    // key不为void 0，则说明肯定是SET | ADD | DELETE这三种操作
+    // 然后将依赖这个key的所有监听函数推到相应队列中
     if (key !== void 0) {
       addRunners(effects, computedRunners, depsMap.get(key))
     }
     // also run for iteration key on ADD | DELETE
+    // 如果是增加或者删除数据的行为，还要再往相应队列中增加监听函数
+    // 这里对add和delete操作多做一次补充操作是因为, 像下面的代码
+    // let arr = reactive<number[]>([])
+    // arr.push(1)
+    // 在执行上面if中的depsMap.get(key), 获取key=1的deps时, 其实取得的是undefined
+    // 使得在addRunners函数中的effectsToAdd !==void 0 为false, 所以其实在上面的if中什么都没干
+    // 在下面这里对上面做了补充操作, 在push时, 除了修改key, 其实还修改了数组的length, 在修改length的时候把effect
+    // 加入到set中, 那就不会导致push操作什么都没修改到了
+    // 但是像下面的代码中
+    // let arr = reactive<number[]>([1,2,3,4,5])
+    // delete arr[1]
+    // depsMap.get(key)不为undefined, 所以添加了一次effect, 然后length也被修改了, 再添加了一次effect
+    // 但是effect并不会被执行两次, 是因为无论是effects还是computedRunners, 都是Set类型
+    // 也就是说相同的effect并不会被add到Set中两次, 所以就算执行了两次addRunners, 加到Set中的元素也只有1个
     if (type === OperationTypes.ADD || type === OperationTypes.DELETE) {
       const iterationKey = Array.isArray(target) ? 'length' : ITERATE_KEY
       addRunners(effects, computedRunners, depsMap.get(iterationKey))
@@ -208,7 +272,9 @@ export function trigger(
   // FIXME: 这里的前后顺序很关键, why???
   // Important: computed effects must be run first so that computed getters
   // can be invalidated before any normal effects that depend on them are run.
+  // 运行计算属性的监听方法
   computedRunners.forEach(run)
+  // 运行正常的监听方法
   effects.forEach(run)
 }
 
