@@ -89,9 +89,17 @@ function trackChildRun(childRunner: ReactiveEffect) {
   if (effectStack.length === 0) {
     return
   }
+  // 获取父级effect
   const parentRunner = effectStack[effectStack.length - 1]
+  // 遍历childRunner的依赖
   for (let i = 0; i < childRunner.deps.length; i++) {
     const dep = childRunner.deps[i]
+    // 如果依赖中没有parentRunner的话, 就添加parentRunner依赖到依赖集中
+    // 以便子的更新可以通知到父级effect
+    // 这里可以建立上下3代之间的关系, 首先childRunner是当前处理的computed元素
+    // 那么childRunner.deps就是computed观察的依赖, 也就是内部的变量
+    // computed的parentRunner, 也就是依赖到computed的上层属性
+    // 如果上层属性没有依赖computed所依赖的变量的话, 就给他们奖励关系(越过了computed, 建立了上层属性到computed内部变量的依赖)
     if (!dep.has(parentRunner)) {
       dep.add(parentRunner)
       parentRunner.deps.push(dep)
