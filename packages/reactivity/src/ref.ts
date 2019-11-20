@@ -1,13 +1,23 @@
 import { track, trigger } from './effect'
 import { OperationTypes } from './operations'
 import { isObject } from '@vue/shared'
-import { reactive } from './reactive'
+import { reactive, isReactive } from './reactive'
 import { ComputedRef } from './computed'
 import { CollectionTypes } from './collectionHandlers'
 
+const isRefSymbol = Symbol()
+
 // 定义Ref接口
 export interface Ref<T = any> {
-  _isRef: true
+  // This field is necessary to allow TS to differentiate a Ref from a plain
+  // object that happens to have a "value" field.
+  // However, checking a symbol on an arbitrary object is much slower than
+  // checking a plain property, so we use a _isRef plain property for isRef()
+  // check in the actual implementation.
+  // The reason for not just declaring _isRef in the interface is because we
+  // don't want this internal field to leak into userland autocompletion -
+  // a private symbol, on the other hand, achieves just that.
+  [isRefSymbol]: true
   value: UnwrapRef<T>
 }
 
@@ -15,9 +25,15 @@ export interface Ref<T = any> {
 const convert = <T extends unknown>(val: T): T =>
   isObject(val) ? reactive(val) : val
 
+// 判断是否为Ref的实例, 其实就是查看对象的refSymbol是否为true
+export function isRef(r: any): r is Ref {
+  return r ? r._isRef === true : false
+}
+
 export function ref<T extends Ref>(raw: T): T
 export function ref<T>(raw: T): Ref<T>
-export function ref(raw: unknown) {
+export function ref<T = any>(): Ref<T>
+export function ref(raw?: unknown) {
   if (isRef(raw)) {
     return raw
   }
@@ -29,20 +45,20 @@ export function ref(raw: unknown) {
   const r = {
     _isRef: true,
     get value() {
-      track(r, OperationTypes.GET, '')
+      track(r, OperationTypes.GET, 'value')
       return raw
     },
     set value(newVal) {
       raw = convert(newVal)
-      trigger(r, OperationTypes.SET, '')
+      trigger(
+        r,
+        OperationTypes.SET,
+        'value',
+        __DEV__ ? { newValue: newVal } : void 0
+      )
     }
   }
-  return r as Ref
-}
-
-// 判断是否为Ref的实例, 其实就是查看对象的refSymbol是否为true
-export function isRef(r: any): r is Ref {
-  return r ? r._isRef === true : false
+  return r
 }
 
 // 转成Ref实例
@@ -51,6 +67,9 @@ export function isRef(r: any): r is Ref {
 export function toRefs<T extends object>(
   object: T
 ): { [K in keyof T]: Ref<T[K]> } {
+  if (__DEV__ && !isReactive(object)) {
+    console.warn(`toRefs() expects a reactive object but received a plain one.`)
+  }
   const ret: any = {}
   for (const key in object) {
     ret[key] = toProxyRef(object, key)
@@ -72,8 +91,10 @@ function toProxyRef<T extends object, K extends keyof T>(
     set value(newVal) {
       object[key] = newVal
     }
-  }
+  } as any
 }
+
+type UnwrapArray<T> = { [P in keyof T]: UnwrapRef<T[P]> }
 
 // Recursively unwraps nested value bindings.
 export type UnwrapRef<T> = {
@@ -81,7 +102,7 @@ export type UnwrapRef<T> = {
   // 如果T是Ref实例的话, 递归解套
   ref: T extends Ref<infer V> ? UnwrapRef<V> : T
   // 如果T是Array的实例的话, 循环递归解套
-  array: T extends Array<infer V> ? Array<UnwrapRef<V>> : T
+  array: T extends Array<infer V> ? Array<UnwrapRef<V>> & UnwrapArray<T> : T
   // 如果T是Object的话, 遍历递归解套
   object: { [K in keyof T]: UnwrapRef<T[K]> }
 }[T extends ComputedRef<any>

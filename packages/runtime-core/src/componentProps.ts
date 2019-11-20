@@ -1,4 +1,4 @@
-import { readonly, toRaw, lock, unlock } from '@vue/reactivity'
+import { toRaw, lock, unlock } from '@vue/reactivity'
 import {
   EMPTY_OBJ,
   camelize,
@@ -27,10 +27,12 @@ export type ComponentObjectPropsOptions<P = Data> = {
 
 export type Prop<T> = PropOptions<T> | PropType<T>
 
+type DefaultFactory<T> = () => T | null | undefined
+
 interface PropOptions<T = any> {
   type?: PropType<T> | true | null
   required?: boolean
-  default?: T | null | undefined | (() => T | null | undefined)
+  default?: T | DefaultFactory<T> | null | undefined
   validator?(value: unknown): boolean
 }
 
@@ -63,14 +65,8 @@ export type ExtractPropTypes<
   O,
   MakeDefaultRequired extends boolean = true
 > = O extends object
-  ? {
-      readonly [K in RequiredKeys<O, MakeDefaultRequired>]: InferPropType<O[K]>
-    } &
-      {
-        readonly [K in OptionalKeys<O, MakeDefaultRequired>]?: InferPropType<
-          O[K]
-        >
-      }
+  ? { [K in RequiredKeys<O, MakeDefaultRequired>]: InferPropType<O[K]> } &
+      { [K in OptionalKeys<O, MakeDefaultRequired>]?: InferPropType<O[K]> }
   : { [K in string]: any }
 
 const enum BooleanFlags {
@@ -198,12 +194,8 @@ export function resolveProps(
   // lock readonly
   lock()
 
-  instance.props = __DEV__ ? readonly(props) : props
-  instance.attrs = options
-    ? __DEV__ && attrs != null
-      ? readonly(attrs)
-      : attrs || EMPTY_OBJ
-    : instance.props
+  instance.props = props
+  instance.attrs = options ? attrs || EMPTY_OBJ : props
 }
 
 const normalizationMap = new WeakMap()

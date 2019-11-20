@@ -2,7 +2,9 @@ import { makeMap } from './makeMap'
 
 export { makeMap }
 export * from './patchFlags'
-export { isGloballyWhitelisted } from './globalsWhitelist'
+export * from './globalsWhitelist'
+export * from './codeframe'
+export * from './domTagConfig'
 
 // 定义不可改空对象
 export const EMPTY_OBJ: { readonly [key: string]: any } = __DEV__

@@ -16,6 +16,7 @@ export const enum ErrorCodes {
   DIRECTIVE_HOOK,
   APP_ERROR_HANDLER,
   APP_WARN_HANDLER,
+  FUNCTION_REF,
   SCHEDULER
 }
 
@@ -43,6 +44,7 @@ export const ErrorTypeStrings: Record<number | string, string> = {
   [ErrorCodes.DIRECTIVE_HOOK]: 'directive hook',
   [ErrorCodes.APP_ERROR_HANDLER]: 'app errorHandler',
   [ErrorCodes.APP_WARN_HANDLER]: 'app warnHandler',
+  [ErrorCodes.FUNCTION_REF]: 'ref function',
   [ErrorCodes.SCHEDULER]:
     'scheduler flush. This is likely a Vue internals bug. ' +
     'Please open an issue at https://new-issue.vuejs.org/?repo=vuejs/vue'
@@ -124,12 +126,15 @@ export function handleError(
   logError(err, type, contextVNode)
 }
 
+// Test-only toggle for testing the uhandled warning behavior
+let forceRecover = false
+export function setErrorRecovery(value: boolean) {
+  forceRecover = value
+}
+
 function logError(err: Error, type: ErrorTypes, contextVNode: VNode | null) {
   // default behavior is crash in prod & test, recover in dev.
-  if (
-    __DEV__ &&
-    !(typeof process !== 'undefined' && process.env.NODE_ENV === 'test')
-  ) {
+  if (__DEV__ && (forceRecover || !__TEST__)) {
     const info = ErrorTypeStrings[type]
     if (contextVNode) {
       pushWarningContext(contextVNode)

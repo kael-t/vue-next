@@ -1,4 +1,4 @@
-import { NO } from '@vue/shared'
+import { NO, makeMap, isArray } from '@vue/shared'
 import {
   ErrorCodes,
   createCompilerError,
@@ -29,6 +29,12 @@ import {
 } from './ast'
 import { extend } from '@vue/shared'
 
+// Portal and Fragment are native types, not components
+const isBuiltInComponent = /*#__PURE__*/ makeMap(
+  `suspense,keep-alive,keepalive,transition`,
+  true
+)
+
 export interface ParserOptions {
   isVoidTag?: (tag: string) => boolean // e.g. img, br, hr
   isNativeTag?: (tag: string) => boolean // e.g. loading-indicator in weex
@@ -40,7 +46,10 @@ export interface ParserOptions {
 
   // Map to HTML entities. E.g., `{ "amp;": "&" }`
   // The full set is https://html.spec.whatwg.org/multipage/named-characters.html#named-character-references
-  namedCharacterReferences?: { [name: string]: string | undefined }
+  namedCharacterReferences?: Record<string, string>
+  // this number is based on the map above, but it should be pre-computed
+  // to avoid the cost on every parse() call.
+  maxCRNameLength?: number
 
   onError?: (error: CompilerError) => void
 }
@@ -63,6 +72,7 @@ export const defaultParserOptions: MergedParserOptions = {
     'apos;': "'",
     'quot;': '"'
   },
+  maxCRNameLength: 5,
   onError: defaultOnError
 }
 
@@ -82,7 +92,6 @@ interface ParserContext {
   offset: number
   line: number
   column: number
-  maxCRNameLength: number
   inPre: boolean
 }
 
@@ -117,10 +126,6 @@ function createParserContext(
     offset: 0,
     originalSource: content,
     source: content,
-    maxCRNameLength: Object.keys(
-      options.namedCharacterReferences ||
-        defaultParserOptions.namedCharacterReferences
-    ).reduce((max, name) => Math.max(max, name.length), 0),
     inPre: false
   }
 }
@@ -135,7 +140,7 @@ function parseChildren(
   const nodes: TemplateChildNode[] = []
 
   while (!isEnd(context, mode, ancestors)) {
-    __DEV__ && assert(context.source.length > 0)
+    __TEST__ && assert(context.source.length > 0)
     const s = context.source
     let node: TemplateChildNode | TemplateChildNode[] | undefined = undefined
 
@@ -197,7 +202,7 @@ function parseChildren(
       node = parseText(context, mode)
     }
 
-    if (Array.isArray(node)) {
+    if (isArray(node)) {
       for (let i = 0; i < node.length; i++) {
         pushNode(nodes, node[i])
       }
@@ -209,7 +214,10 @@ function parseChildren(
   // Whitespace management for more efficient output
   // (same as v2 whitespance: 'condense')
   let removedWhitespace = false
-  if (!parent || !context.options.isPreTag(parent.tag)) {
+  if (
+    mode !== TextModes.RAWTEXT &&
+    (!parent || !context.options.isPreTag(parent.tag))
+  ) {
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i]
       if (node.type === NodeTypes.TEXT) {
@@ -277,16 +285,16 @@ function parseCDATA(
   context: ParserContext,
   ancestors: ElementNode[]
 ): TemplateChildNode[] {
-  __DEV__ &&
+  __TEST__ &&
     assert(last(ancestors) == null || last(ancestors)!.ns !== Namespaces.HTML)
-  __DEV__ && assert(startsWith(context.source, '<![CDATA['))
+  __TEST__ && assert(startsWith(context.source, '<![CDATA['))
 
   advanceBy(context, 9)
   const nodes = parseChildren(context, TextModes.CDATA, ancestors)
   if (context.source.length === 0) {
     emitError(context, ErrorCodes.EOF_IN_CDATA)
   } else {
-    __DEV__ && assert(startsWith(context.source, ']]>'))
+    __TEST__ && assert(startsWith(context.source, ']]>'))
     advanceBy(context, 3)
   }
 
@@ -294,7 +302,7 @@ function parseCDATA(
 }
 
 function parseComment(context: ParserContext): CommentNode {
-  __DEV__ && assert(startsWith(context.source, '<!--'))
+  __TEST__ && assert(startsWith(context.source, '<!--'))
 
   const start = getCursor(context)
   let content: string
@@ -336,7 +344,7 @@ function parseComment(context: ParserContext): CommentNode {
 }
 
 function parseBogusComment(context: ParserContext): CommentNode | undefined {
-  __DEV__ && assert(/^<(?:[\!\?]|\/[^a-z>])/i.test(context.source))
+  __TEST__ && assert(/^<(?:[\!\?]|\/[^a-z>])/i.test(context.source))
 
   const start = getCursor(context)
   const contentStart = context.source[1] === '?' ? 1 : 2
@@ -362,7 +370,7 @@ function parseElement(
   context: ParserContext,
   ancestors: ElementNode[]
 ): ElementNode | undefined {
-  __DEV__ && assert(/^<[a-z]/i.test(context.source))
+  __TEST__ && assert(/^<[a-z]/i.test(context.source))
 
   // Start tag.
   const wasInPre = context.inPre
@@ -416,8 +424,8 @@ function parseTag(
   type: TagType,
   parent: ElementNode | undefined
 ): ElementNode {
-  __DEV__ && assert(/^<\/?[a-z]/i.test(context.source))
-  __DEV__ &&
+  __TEST__ && assert(/^<\/?[a-z]/i.test(context.source))
+  __TEST__ &&
     assert(
       type === (startsWith(context.source, '</') ? TagType.End : TagType.Start)
     )
@@ -467,15 +475,15 @@ function parseTag(
   if (!context.inPre && !context.options.isCustomElement(tag)) {
     if (context.options.isNativeTag) {
       if (!context.options.isNativeTag(tag)) tagType = ElementTypes.COMPONENT
-    } else {
-      if (/^[A-Z]/.test(tag)) tagType = ElementTypes.COMPONENT
+    } else if (isBuiltInComponent(tag) || /^[A-Z]/.test(tag)) {
+      tagType = ElementTypes.COMPONENT
     }
 
-    if (tag === 'slot') tagType = ElementTypes.SLOT
-    else if (tag === 'template') tagType = ElementTypes.TEMPLATE
-    else if (tag === 'portal' || tag === 'Portal') tagType = ElementTypes.PORTAL
-    else if (tag === 'suspense' || tag === 'Suspense')
-      tagType = ElementTypes.SUSPENSE
+    if (tag === 'slot') {
+      tagType = ElementTypes.SLOT
+    } else if (tag === 'template') {
+      tagType = ElementTypes.TEMPLATE
+    }
   }
 
   return {
@@ -529,7 +537,7 @@ function parseAttribute(
   context: ParserContext,
   nameSet: Set<string>
 ): AttributeNode | DirectiveNode {
-  __DEV__ && assert(/^[^\t\r\n\f />]/.test(context.source))
+  __TEST__ && assert(/^[^\t\r\n\f />]/.test(context.source))
 
   // Name.
   const start = getCursor(context)
@@ -586,7 +594,7 @@ function parseAttribute(
     let arg: ExpressionNode | undefined
 
     if (match[2]) {
-      const startOffset = name.split(match[2], 2)!.shift()!.length
+      const startOffset = name.indexOf(match[2])
       const loc = getSelection(
         context,
         getNewPosition(context, start, startOffset),
@@ -716,7 +724,7 @@ function parseInterpolation(
   mode: TextModes
 ): InterpolationNode | undefined {
   const [open, close] = context.options.delimiters
-  __DEV__ && assert(startsWith(context.source, open))
+  __TEST__ && assert(startsWith(context.source, open))
 
   const closeIndex = context.source.indexOf(close, open.length)
   if (closeIndex === -1) {
@@ -756,19 +764,22 @@ function parseInterpolation(
 }
 
 function parseText(context: ParserContext, mode: TextModes): TextNode {
-  __DEV__ && assert(context.source.length > 0)
+  __TEST__ && assert(context.source.length > 0)
 
-  const [open] = context.options.delimiters
-  // TODO could probably use some perf optimization
-  const endIndex = Math.min(
-    ...[
-      context.source.indexOf('<', 1),
-      context.source.indexOf(open, 1),
-      mode === TextModes.CDATA ? context.source.indexOf(']]>') : -1,
-      context.source.length
-    ].filter(n => n !== -1)
-  )
-  __DEV__ && assert(endIndex > 0)
+  const endTokens = ['<', context.options.delimiters[0]]
+  if (mode === TextModes.CDATA) {
+    endTokens.push(']]>')
+  }
+
+  let endIndex = context.source.length
+  for (let i = 0; i < endTokens.length; i++) {
+    const index = context.source.indexOf(endTokens[i], 1)
+    if (index !== -1 && endIndex > index) {
+      endIndex = index
+    }
+  }
+
+  __TEST__ && assert(endIndex > 0)
 
   const start = getCursor(context)
   const content = parseTextData(context, endIndex, mode)
@@ -789,40 +800,49 @@ function parseTextData(
   length: number,
   mode: TextModes
 ): string {
-  if (mode === TextModes.RAWTEXT || mode === TextModes.CDATA) {
-    const text = context.source.slice(0, length)
+  let rawText = context.source.slice(0, length)
+  if (
+    mode === TextModes.RAWTEXT ||
+    mode === TextModes.CDATA ||
+    rawText.indexOf('&') === -1
+  ) {
     advanceBy(context, length)
-    return text
+    return rawText
   }
 
-  // DATA or RCDATA. Entity decoding required.
+  // DATA or RCDATA containing "&"". Entity decoding required.
   const end = context.offset + length
-  let text: string = ''
+  let decodedText = ''
+
+  function advance(length: number) {
+    advanceBy(context, length)
+    rawText = rawText.slice(length)
+  }
 
   while (context.offset < end) {
-    const head = /&(?:#x?)?/i.exec(context.source)
+    const head = /&(?:#x?)?/i.exec(rawText)
     if (!head || context.offset + head.index >= end) {
       const remaining = end - context.offset
-      text += context.source.slice(0, remaining)
-      advanceBy(context, remaining)
+      decodedText += rawText.slice(0, remaining)
+      advance(remaining)
       break
     }
 
     // Advance to the "&".
-    text += context.source.slice(0, head.index)
-    advanceBy(context, head.index)
+    decodedText += rawText.slice(0, head.index)
+    advance(head.index)
 
     if (head[0] === '&') {
       // Named character reference.
       let name = '',
         value: string | undefined = undefined
-      if (/[0-9a-z]/i.test(context.source[1])) {
+      if (/[0-9a-z]/i.test(rawText[1])) {
         for (
-          let length = context.maxCRNameLength;
+          let length = context.options.maxCRNameLength;
           !value && length > 0;
           --length
         ) {
-          name = context.source.substr(1, length)
+          name = rawText.substr(1, length)
           value = context.options.namedCharacterReferences[name]
         }
         if (value) {
@@ -830,14 +850,13 @@ function parseTextData(
           if (
             mode === TextModes.ATTRIBUTE_VALUE &&
             !semi &&
-            /[=a-z0-9]/i.test(context.source[1 + name.length] || '')
+            /[=a-z0-9]/i.test(rawText[1 + name.length] || '')
           ) {
-            text += '&'
-            text += name
-            advanceBy(context, 1 + name.length)
+            decodedText += '&' + name
+            advance(1 + name.length)
           } else {
-            text += value
-            advanceBy(context, 1 + name.length)
+            decodedText += value
+            advance(1 + name.length)
             if (!semi) {
               emitError(
                 context,
@@ -847,26 +866,25 @@ function parseTextData(
           }
         } else {
           emitError(context, ErrorCodes.UNKNOWN_NAMED_CHARACTER_REFERENCE)
-          text += '&'
-          text += name
-          advanceBy(context, 1 + name.length)
+          decodedText += '&' + name
+          advance(1 + name.length)
         }
       } else {
-        text += '&'
-        advanceBy(context, 1)
+        decodedText += '&'
+        advance(1)
       }
     } else {
       // Numeric character reference.
       const hex = head[0] === '&#x'
       const pattern = hex ? /^&#x([0-9a-f]+);?/i : /^&#([0-9]+);?/
-      const body = pattern.exec(context.source)
+      const body = pattern.exec(rawText)
       if (!body) {
-        text += head[0]
+        decodedText += head[0]
         emitError(
           context,
           ErrorCodes.ABSENCE_OF_DIGITS_IN_NUMERIC_CHARACTER_REFERENCE
         )
-        advanceBy(context, head[0].length)
+        advance(head[0].length)
       } else {
         // https://html.spec.whatwg.org/multipage/parsing.html#numeric-character-reference-end-state
         let cp = Number.parseInt(body[1], hex ? 16 : 10)
@@ -893,8 +911,8 @@ function parseTextData(
           emitError(context, ErrorCodes.CONTROL_CHARACTER_REFERENCE)
           cp = CCR_REPLACEMENTS[cp] || cp
         }
-        text += String.fromCodePoint(cp)
-        advanceBy(context, body[0].length)
+        decodedText += String.fromCodePoint(cp)
+        advance(body[0].length)
         if (!body![0].endsWith(';')) {
           emitError(
             context,
@@ -904,7 +922,7 @@ function parseTextData(
       }
     }
   }
-  return text
+  return decodedText
 }
 
 function getCursor(context: ParserContext): Position {
@@ -935,7 +953,7 @@ function startsWith(source: string, searchString: string): boolean {
 
 function advanceBy(context: ParserContext, numberOfCharacters: number): void {
   const { source } = context
-  __DEV__ && assert(numberOfCharacters <= source.length)
+  __TEST__ && assert(numberOfCharacters <= source.length)
   advancePositionWithMutation(context, source, numberOfCharacters)
   context.source = source.slice(numberOfCharacters)
 }

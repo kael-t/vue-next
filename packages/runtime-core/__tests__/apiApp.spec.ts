@@ -81,6 +81,11 @@ describe('api: createApp', () => {
 
     app.component('BarBaz', () => 'barbaz!')
 
+    app.component('BarBaz', () => 'barbaz!')
+    expect(
+      'Component "BarBaz" has already been registered in target app.'
+    ).toHaveBeenWarnedTimes(1)
+
     const Root = {
       // local override
       components: {
@@ -116,6 +121,13 @@ describe('api: createApp', () => {
     app.directive('BarBaz', {
       mounted: spy2
     })
+
+    app.directive('BarBaz', {
+      mounted: spy2
+    })
+    expect(
+      'Directive "BarBaz" has already been registered in target app.'
+    ).toHaveBeenWarnedTimes(1)
 
     const Root = {
       // local override
@@ -164,6 +176,7 @@ describe('api: createApp', () => {
       }
     }
     const mixinB = {
+      name: 'mixinB',
       data() {
         return {
           b: 2
@@ -203,6 +216,15 @@ describe('api: createApp', () => {
     app.mixin(mixinA)
     app.mixin(mixinB)
 
+    app.mixin(mixinA)
+    app.mixin(mixinB)
+    expect(
+      'Mixin has already been applied to target app'
+    ).toHaveBeenWarnedTimes(2)
+    expect(
+      'Mixin has already been applied to target app: mixinB'
+    ).toHaveBeenWarnedTimes(1)
+
     const root = nodeOps.createElement('div')
     app.mount(Comp, root)
 
@@ -237,6 +259,11 @@ describe('api: createApp', () => {
     const root = nodeOps.createElement('div')
     app.mount(Root, root)
     expect(serializeInner(root)).toBe(`1,2`)
+
+    app.use(PluginA)
+    expect(
+      `Plugin has already been applied to target app`
+    ).toHaveBeenWarnedTimes(1)
   })
 
   test('config.errorHandler', () => {

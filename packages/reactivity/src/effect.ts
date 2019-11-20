@@ -1,6 +1,6 @@
 import { OperationTypes } from './operations'
 import { Dep, targetMap } from './reactive'
-import { EMPTY_OBJ, extend } from '@vue/shared'
+import { EMPTY_OBJ, extend, isArray } from '@vue/shared'
 
 // 定义响应作用接口
 export interface ReactiveEffect<T = any> {
@@ -15,16 +15,7 @@ export interface ReactiveEffect<T = any> {
   // 暂时未知，根据名字来看是存一些依赖
   // 根据类型来看，存放是二维集合数据，一维是数组，二维是ReactiveEffect的Set集合
   deps: Array<Dep>
-  // 是否是computed数据依赖的监听函数
-  computed?: boolean
-  // 调度器函数，接受的入参run即是传给effect的函数，如果传了scheduler，则可通过其调用监听函数。
-  scheduler?: (run: Function) => void
-  // 调试用, 在依赖收集(getter)时会被调用
-  onTrack?: (event: DebuggerEvent) => void
-  // 调试用, 在触发更新(setter)时会被调用
-  onTrigger?: (event: DebuggerEvent) => void
-  //通过 `stop` 终止监听函数时触发的事件。
-  onStop?: () => void
+  options: ReactiveEffectOptions
 }
 
 export interface ReactiveEffectOptions {
@@ -97,8 +88,8 @@ export function stop(effect: ReactiveEffect) {
     // 清空effect的依赖表
     cleanup(effect)
     // 如果提供了onStop回调,则调用(调试用)
-    if (effect.onStop) {
-      effect.onStop()
+    if (effect.options.onStop) {
+      effect.options.onStop()
     }
     // 把effect设置成不试用状态
     effect.active = false
@@ -118,12 +109,8 @@ function createReactiveEffect<T = any>(
   effect._isEffect = true
   effect.active = true
   effect.raw = fn
-  effect.scheduler = options.scheduler
-  effect.onTrack = options.onTrack
-  effect.onTrigger = options.onTrigger
-  effect.onStop = options.onStop
-  effect.computed = options.computed
   effect.deps = []
+  effect.options = options
   return effect
 }
 
@@ -204,8 +191,8 @@ export function track(target: object, type: OperationTypes, key?: unknown) {
     dep.add(effect)
     effect.deps.push(dep)
     // 在__DEV__下且effect.onTrack存在时, 调用该effect.onTrack方法, 方便调试使用
-    if (__DEV__ && effect.onTrack) {
-      effect.onTrack({
+    if (__DEV__ && effect.options.onTrack) {
+      effect.options.onTrack({
         effect,
         target,
         type,
@@ -262,7 +249,7 @@ export function trigger(
     // 但是effect并不会被执行两次, 是因为无论是effects还是computedRunners, 都是Set类型
     // 也就是说相同的effect并不会被add到Set中两次, 所以就算执行了两次addRunners, 加到Set中的元素也只有1个
     if (type === OperationTypes.ADD || type === OperationTypes.DELETE) {
-      const iterationKey = Array.isArray(target) ? 'length' : ITERATE_KEY
+      const iterationKey = isArray(target) ? 'length' : ITERATE_KEY
       addRunners(effects, computedRunners, depsMap.get(iterationKey))
     }
   }
@@ -289,7 +276,7 @@ function addRunners(
     // 遍历, 如果effect.computed是true的话, 也就是当前的响应式对象是computed的
     // 就加入computed队列, 否则加入正常队列
     effectsToAdd.forEach(effect => {
-      if (effect.computed) {
+      if (effect.options.computed) {
         computedRunners.add(effect)
       } else {
         effects.add(effect)
@@ -306,19 +293,19 @@ function scheduleRun(
   key: unknown,
   extraInfo?: DebuggerEventExtraInfo
 ) {
-  if (__DEV__ && effect.onTrigger) {
+  if (__DEV__ && effect.options.onTrigger) {
     const event: DebuggerEvent = {
       effect,
       target,
       key,
       type
     }
-    effect.onTrigger(extraInfo ? extend(event, extraInfo) : event)
+    effect.options.onTrigger(extraInfo ? extend(event, extraInfo) : event)
   }
   // 如果调度函数存在, 就传入响应式对象调用调度函数
   // 否则直接调用effect
-  if (effect.scheduler !== void 0) {
-    effect.scheduler(effect)
+  if (effect.options.scheduler !== void 0) {
+    effect.options.scheduler(effect)
   } else {
     effect()
   }

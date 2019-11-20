@@ -1,13 +1,18 @@
 // Public API ------------------------------------------------------------------
 
-export { createComponent } from './apiCreateComponent'
-export { nextTick } from './scheduler'
+export const version = __VERSION__
 export * from './apiReactivity'
 export * from './apiWatch'
 export * from './apiLifecycle'
 export * from './apiInject'
+export { nextTick } from './scheduler'
+export { createComponent } from './apiCreateComponent'
 
 // Advanced API ----------------------------------------------------------------
+
+// For getting a hold of the internal instance in setup() - useful for advanced
+// plugins
+export { getCurrentInstance } from './component'
 
 // For raw render function users
 export { h } from './h'
@@ -19,16 +24,30 @@ export {
   createBlock
 } from './vnode'
 // VNode type symbols
-export { Text, Comment, Fragment, Portal, Suspense } from './vnode'
+export { Text, Comment, Fragment, Portal } from './vnode'
+// Internal Components
+export { Suspense, SuspenseProps } from './components/Suspense'
+export { KeepAlive, KeepAliveProps } from './components/KeepAlive'
 // VNode flags
 export { PublicShapeFlags as ShapeFlags } from './shapeFlags'
-export { PublicPatchFlags as PatchFlags } from '@vue/shared'
-
-// For advanced plugins
-export { getCurrentInstance } from './component'
+import { PublicPatchFlags } from '@vue/shared'
+export const PatchFlags = PublicPatchFlags as {
+  // export patch flags as plain numbers to avoid d.ts relying on @vue/shared
+  // the enum type is internal anyway.
+  TEXT: number
+  CLASS: number
+  STYLE: number
+  PROPS: number
+  NEED_PATCH: number
+  FULL_PROPS: number
+  KEYED_FRAGMENT: number
+  UNKEYED_FRAGMENT: number
+  DYNAMIC_SLOTS: number
+  BAIL: number
+}
 
 // For custom renderers
-export { createRenderer } from './createRenderer'
+export { createRenderer, RootRenderFunction } from './renderer'
 export { warn } from './warning'
 export {
   handleError,
@@ -50,7 +69,12 @@ export { toHandlers } from './helpers/toHandlers'
 export { renderSlot } from './helpers/renderSlot'
 export { createSlots } from './helpers/createSlots'
 export { setBlockTracking, createTextVNode, createCommentVNode } from './vnode'
-export { capitalize, camelize } from '@vue/shared'
+// Since @vue/shared is inlined into final builds,
+// when re-exporting from @vue/shared we need to avoid relying on their original
+// types so that the bundled d.ts does not attempt to import from it.
+import { capitalize as _capitalize, camelize as _camelize } from '@vue/shared'
+export const capitalize = _capitalize as (s: string) => string
+export const camelize = _camelize as (s: string) => string
 
 // Internal, for integration with runtime compiler
 export { registerRuntimeCompiler } from './component'
@@ -58,8 +82,7 @@ export { registerRuntimeCompiler } from './component'
 // Types -----------------------------------------------------------------------
 
 export { App, AppConfig, AppContext, Plugin } from './apiApp'
-export { RawProps, RawChildren, RawSlots } from './h'
-export { VNode, VNodeTypes } from './vnode'
+export { VNode, VNodeTypes, VNodeProps } from './vnode'
 export {
   Component,
   FunctionalComponent,
@@ -74,7 +97,7 @@ export {
 } from './apiOptions'
 
 export { ComponentPublicInstance } from './componentProxy'
-export { RendererOptions } from './createRenderer'
+export { RendererOptions } from './renderer'
 export { Slot, Slots } from './componentSlots'
 export {
   Prop,
@@ -90,6 +113,4 @@ export {
   FunctionDirective,
   DirectiveArguments
 } from './directives'
-export { SuspenseBoundary } from './suspense'
-
-export const version = __VERSION__
+export { SuspenseBoundary } from './components/Suspense'

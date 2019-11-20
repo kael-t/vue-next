@@ -2,7 +2,7 @@ import { effect, ReactiveEffect, effectStack } from './effect'
 import { Ref, UnwrapRef } from './ref'
 import { isFunction, NOOP } from '@vue/shared'
 
-export interface ComputedRef<T> extends WritableComputedRef<T> {
+export interface ComputedRef<T = any> extends WritableComputedRef<T> {
   readonly value: UnwrapRef<T>
 }
 
@@ -82,7 +82,7 @@ export function computed<T>(
     set value(newValue: T) {
       setter(newValue)
     }
-  }
+  } as any
 }
 
 function trackChildRun(childRunner: ReactiveEffect) {
