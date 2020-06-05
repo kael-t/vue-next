@@ -1,13 +1,14 @@
-const lernaJson = require('./lerna.json')
-
 module.exports = {
   preset: 'ts-jest',
   globals: {
     __DEV__: true,
     __TEST__: true,
-    __VERSION__: lernaJson.version,
+    __VERSION__: require('./package.json').version,
     __BROWSER__: false,
-    __RUNTIME_COMPILE__: true,
+    __GLOBAL__: false,
+    __ESM_BUNDLER__: true,
+    __ESM_BROWSER__: false,
+    __NODE_JS__: true,
     __FEATURE_OPTIONS__: true,
     __FEATURE_SUSPENSE__: true
   },
@@ -15,15 +16,23 @@ module.exports = {
   coverageReporters: ['html', 'lcov', 'text'],
   collectCoverageFrom: [
     'packages/*/src/**/*.ts',
+    '!packages/runtime-test/src/utils/**',
     '!packages/template-explorer/**',
-    '!packages/runtime-test/src/utils/**'
+    '!packages/size-check/**',
+    '!packages/runtime-core/src/profiling.ts'
   ],
-  watchPathIgnorePatterns: ['/node_modules/'],
+  watchPathIgnorePatterns: ['/node_modules/', '/dist/', '/.git/'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'json'],
   moduleNameMapper: {
-    '^@vue/(.*?)$': '<rootDir>/packages/$1/src'
+    '^@vue/(.*?)$': '<rootDir>/packages/$1/src',
+    vue: '<rootDir>/packages/vue/src'
   },
   rootDir: __dirname,
   // 可以修改下面这里的匹配字符串, 在看源码时每次只调试你在看的部分的测试代码
-  testMatch: ['<rootDir>/packages/**/__tests__/**/*spec.[jt]s?(x)']
+  testMatch: ['<rootDir>/packages/**/__tests__/**/*spec.[jt]s?(x)'],
+  testPathIgnorePatterns: process.env.SKIP_E2E
+    ? // ignore example tests on netlify builds since they don't contribute
+      // to coverage and can cause netlify builds to fail
+      ['/node_modules/', '/examples/__tests__']
+    : ['/node_modules/']
 }

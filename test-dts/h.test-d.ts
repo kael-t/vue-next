@@ -1,6 +1,14 @@
-import { describe } from './util'
-import { expectError } from 'tsd'
-import { h, createComponent, ref, Fragment, Portal, Suspense } from './index'
+import { expectError, expectAssignable } from 'tsd'
+import {
+  describe,
+  h,
+  defineComponent,
+  ref,
+  Fragment,
+  Teleport,
+  Suspense,
+  Component
+} from './index'
 
 describe('h inference w/ element', () => {
   // key
@@ -25,11 +33,11 @@ describe('h inference w/ Fragment', () => {
   expectError(h(Fragment, { key: 123 }, 'bar'))
 })
 
-describe('h inference w/ Portal', () => {
-  h(Portal, { target: '#foo' }, 'hello')
-  expectError(h(Portal))
-  expectError(h(Portal, {}))
-  expectError(h(Portal, { target: '#foo' }))
+describe('h inference w/ Teleport', () => {
+  h(Teleport, { to: '#foo' }, 'hello')
+  expectError(h(Teleport))
+  expectError(h(Teleport, {}))
+  expectError(h(Teleport, { to: '#foo' }))
 })
 
 describe('h inference w/ Suspense', () => {
@@ -51,21 +59,19 @@ describe('h inference w/ functional component', () => {
   expectError(h(Func, { bar: 123 }))
 })
 
-describe('h inference w/ plain object component', () => {
+describe('h support w/ plain object component', () => {
   const Foo = {
     props: {
       foo: String
     }
   }
-
   h(Foo, { foo: 'ok' })
   h(Foo, { foo: 'ok', class: 'extra' })
-  // should fail on wrong type
-  expectError(h(Foo, { foo: 1 }))
+  // no inference in this case
 })
 
-describe('h inference w/ createComponent', () => {
-  const Foo = createComponent({
+describe('h inference w/ defineComponent', () => {
+  const Foo = defineComponent({
     props: {
       foo: String,
       bar: {
@@ -86,8 +92,8 @@ describe('h inference w/ createComponent', () => {
   expectError(h(Foo, { bar: 1, foo: 1 }))
 })
 
-describe('h inference w/ createComponent + optional props', () => {
-  const Foo = createComponent({
+describe('h inference w/ defineComponent + optional props', () => {
+  const Foo = defineComponent({
     setup(_props: { foo?: string; bar: number }) {}
   })
 
@@ -102,8 +108,8 @@ describe('h inference w/ createComponent + optional props', () => {
   expectError(h(Foo, { bar: 1, foo: 1 }))
 })
 
-describe('h inference w/ createComponent + direct function', () => {
-  const Foo = createComponent((_props: { foo?: string; bar: number }) => {})
+describe('h inference w/ defineComponent + direct function', () => {
+  const Foo = defineComponent((_props: { foo?: string; bar: number }) => {})
 
   h(Foo, { bar: 1 })
   h(Foo, { bar: 1, foo: 'ok' })
@@ -114,4 +120,45 @@ describe('h inference w/ createComponent + direct function', () => {
   expectError(h(Foo, { foo: 'ok' }))
   // should fail on wrong type
   expectError(h(Foo, { bar: 1, foo: 1 }))
+})
+
+// #922
+describe('h support for generic component type', () => {
+  function foo(bar: Component) {
+    h(bar)
+    h(bar, 'hello')
+    h(bar, { id: 'ok' }, 'hello')
+  }
+  foo({})
+})
+
+// #993
+describe('describeComponent extends Component', () => {
+  // functional
+  expectAssignable<Component>(
+    defineComponent((_props: { foo?: string; bar: number }) => {})
+  )
+
+  // typed props
+  expectAssignable<Component>(defineComponent({}))
+
+  // prop arrays
+  expectAssignable<Component>(
+    defineComponent({
+      props: ['a', 'b']
+    })
+  )
+
+  // prop object
+  expectAssignable<Component>(
+    defineComponent({
+      props: {
+        foo: String,
+        bar: {
+          type: Number,
+          required: true
+        }
+      }
+    })
+  )
 })

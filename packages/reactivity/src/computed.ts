@@ -1,16 +1,17 @@
-import { effect, ReactiveEffect, effectStack } from './effect'
-import { Ref, UnwrapRef } from './ref'
+import { effect, ReactiveEffect, trigger, track } from './effect'
+import { TriggerOpTypes, TrackOpTypes } from './operations'
+import { Ref } from './ref'
 import { isFunction, NOOP } from '@vue/shared'
 
 export interface ComputedRef<T = any> extends WritableComputedRef<T> {
-  readonly value: UnwrapRef<T>
+  readonly value: T
 }
 
 export interface WritableComputedRef<T> extends Ref<T> {
   readonly effect: ReactiveEffect<T>
 }
 
-export type ComputedGetter<T> = () => T
+export type ComputedGetter<T> = (ctx?: any) => T
 export type ComputedSetter<T> = (v: T) => void
 
 export interface WritableComputedOptions<T> {
@@ -47,6 +48,7 @@ export function computed<T>(
   // 标识是否已经修改过但未求值
   let dirty = true
   let value: T
+  let computed: ComputedRef<T>
 
   // 因为是lazy=true, 所以这里并不会立即计算
   const runner = effect(getter, {
@@ -59,11 +61,14 @@ export function computed<T>(
     // 使得这个computed的dirty=true, 然后每次调用computed的getter时检测dirty
     // 一旦dirty为true, 则调用getter更新computed的值, computed的求值是惰性的, 跟vue2.x一致
     scheduler: () => {
-      dirty = true
+      if (!dirty) {
+        dirty = true
+        trigger(computed, TriggerOpTypes.SET, 'value')
+      }
     }
   })
-  return {
-    _isRef: true,
+  computed = {
+    __v_isRef: true,
     // expose effect so computed can be stopped
     effect: runner,
     get value() {
@@ -73,36 +78,12 @@ export function computed<T>(
         value = runner()
         dirty = false
       }
-      // When computed effects are accessed in a parent effect, the parent
-      // should track all the dependencies the computed property has tracked.
-      // This should also apply for chained computed properties.
-      trackChildRun(runner)
+      track(computed, TrackOpTypes.GET, 'value')
       return value
     },
     set value(newValue: T) {
       setter(newValue)
     }
   } as any
-}
-
-function trackChildRun(childRunner: ReactiveEffect) {
-  if (effectStack.length === 0) {
-    return
-  }
-  // 获取父级effect
-  const parentRunner = effectStack[effectStack.length - 1]
-  // 遍历childRunner的依赖
-  for (let i = 0; i < childRunner.deps.length; i++) {
-    const dep = childRunner.deps[i]
-    // 如果依赖中没有parentRunner的话, 就添加parentRunner依赖到依赖集中
-    // 以便子的更新可以通知到父级effect
-    // 这里可以建立上下3代之间的关系, 首先childRunner是当前处理的computed元素
-    // 那么childRunner.deps就是computed观察的依赖, 也就是内部的变量
-    // computed的parentRunner, 也就是依赖到computed的上层属性
-    // 如果上层属性没有依赖computed所依赖的变量的话, 就给他们奖励关系(越过了computed, 建立了上层属性到computed内部变量的依赖)
-    if (!dep.has(parentRunner)) {
-      dep.add(parentRunner)
-      parentRunner.deps.push(dep)
-    }
-  }
+  return computed
 }
