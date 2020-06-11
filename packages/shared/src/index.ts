@@ -32,16 +32,7 @@ export const NO = () => false
 const onRE = /^on[^a-z]/
 export const isOn = (key: string) => onRE.test(key)
 
-// 把b对象的属性赋值给a对象(浅拷贝)
-export const extend = <T extends object, U extends object>(
-  a: T,
-  b: U
-): T & U => {
-  for (const key in b) {
-    ;(a as any)[key] = b[key]
-  }
-  return a as any
-}
+export const extend = Object.assign
 
 // 移除数组元素方法
 export const remove = <T>(arr: T[], el: T) => {

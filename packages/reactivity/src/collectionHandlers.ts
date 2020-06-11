@@ -294,7 +294,7 @@ iteratorMethods.forEach(method => {
   )
   shallowInstrumentations[method as string] = createIterableMethod(
     method,
-    true,
+    false,
     true
   )
 })
