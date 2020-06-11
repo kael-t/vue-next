@@ -12,6 +12,7 @@ import {
 } from './collectionHandlers'
 import { UnwrapRef, Ref } from './ref'
 
+// 定义一些属性枚举
 export const enum ReactiveFlags {
   skip = '__v_skip',
   isReactive = '__v_isReactive',
@@ -21,10 +22,11 @@ export const enum ReactiveFlags {
   readonly = '__v_readonly'
 }
 
+// 定义一些属性标识
 interface Target {
-  __v_skip?: boolean
-  __v_isReactive?: boolean
-  __v_isReadonly?: boolean
+  __v_skip?: boolean // Vue3的VNode都带有__v_skip: true标识, 该属性为true说明是Vue3的VNode
+  __v_isReactive?: boolean // 标识是否是响应式的
+  __v_isReadonly?: boolean // 标识是否是只读的
   __v_raw?: any
   __v_reactive?: any
   __v_readonly?: any
@@ -36,12 +38,11 @@ const isObservableType = /*#__PURE__*/ makeMap(
   'Object,Array,Map,Set,WeakMap,WeakSet'
 )
 
-// 判断这个value是否能够设置为响应式的 TODO: 这里被修改了, 重新看看吧
-// 要求: 
-// 1. 不是Vue实例
-// 2. 不是VNode
-// 3. 是Object|Array|Map|Set|WeakMap|WeakSet类型的
-// 4. 不在nonReactiveValues中(没有被标记为非响应式的)
+// 判断这个value是否能够设置为响应式的
+// 要求:
+// 1. 不是VNode
+// 2. 是Object|Array|Map|Set|WeakMap|WeakSet类型的
+// 3. 没有被冻结(传入对象没有被frozen)
 const canObserve = (value: Target): boolean => {
   return (
     !value.__v_skip &&
@@ -56,9 +57,11 @@ type UnwrapNestedRefs<T> = T extends Ref ? T : UnwrapRef<T>
 export function reactive<T extends object>(target: T): UnwrapNestedRefs<T>
 export function reactive(target: object) {
   // if trying to observe a readonly proxy, return the readonly version.
+  // 如果对已经是readonly的响应式对象进行reactive, 直接返回readonly版本的对象
   if (target && (target as Target).__v_isReadonly) {
     return target
   }
+  // 创建reactive响应式对象
   return createReactiveObject(
     target,
     false,
@@ -70,6 +73,7 @@ export function reactive(target: object) {
 // Return a reactive-copy of the original object, where only the root level
 // properties are reactive, and does NOT unwrap refs nor recursively convert
 // returned properties.
+// 创建shallowReactive响应式对象, 只有最上层的属性是响应式的, 不会解包ref也不会递归将深层的属性转换成响应式
 export function shallowReactive<T extends object>(target: T): T {
   return createReactiveObject(
     target,
@@ -110,8 +114,8 @@ export function shallowReadonly<T extends object>(
  * @param target 目标对象
  * @param toProxy 响应式对象存储的weakMap
  * @param toRaw 原值存储的weakMap
- * @param baseHandlers 
- * @param collectionHandlers 
+ * @param baseHandlers
+ * @param collectionHandlers
  */
 function createReactiveObject(
   target: Target,
@@ -146,6 +150,7 @@ function createReactiveObject(
     target,
     collectionTypes.has(target.constructor) ? collectionHandlers : baseHandlers
   )
+  // 把创建的响应式对象存在对应的__v_reactive 或 __v_readonly中
   def(
     target,
     isReadonly ? ReactiveFlags.readonly : ReactiveFlags.reactive,
@@ -154,7 +159,8 @@ function createReactiveObject(
   return observed
 }
 
-// value是否为响应式的(在reactiveToRaw和readonlyToRaw两个WeakMap中查看是否有该值)
+// value是否为响应式的(先看下__v_isReadonly是true还是false, true的话看下value原值是否是响应式的, false的话直接返回value的__v_isReactive标志)
+// TODO: 对响应式对象设置readonly代理?? 对readonly对象再做readonly代理??? 千层塔???
 export function isReactive(value: unknown): boolean {
   if (isReadonly(value)) {
     return isReactive((value as Target).__v_raw)
@@ -162,19 +168,22 @@ export function isReactive(value: unknown): boolean {
   return !!(value && (value as Target).__v_isReactive)
 }
 
-// value是否为readonly的(在readonlyToRaw中查看是否包含该值)
+// value是否为readonly的(查看__v_isReadonly的值)
 export function isReadonly(value: unknown): boolean {
   return !!(value && (value as Target).__v_isReadonly)
 }
 
+// 简单说就是__v_isReactive/__v_isReadonly标志有一个为true的就是isProxy
 export function isProxy(value: unknown): boolean {
   return isReactive(value) || isReadonly(value)
 }
 
+// 取得代理对象的原值
 export function toRaw<T>(observed: T): T {
   return (observed && toRaw((observed as Target).__v_raw)) || observed
 }
 
+// 把__v_skip标志设置成true, 表明这个对象不会被vue劫持代理, 也就是标志这个值为raw的
 export function markRaw<T extends object>(value: T): T {
   def(value, ReactiveFlags.skip, true)
   return value

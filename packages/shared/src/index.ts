@@ -126,7 +126,7 @@ export const capitalize = cacheStringFunction(
 )
 
 // compare whether a value has changed, accounting for NaN.
-// 对比两个值是否有改变, NaN !== NaN的
+// 对比两个值是否有改变, NaN !== NaN的, 所以新旧值都是NaN会被当做没有变化
 export const hasChanged = (value: any, oldValue: any): boolean =>
   value !== oldValue && (value === value || oldValue === oldValue)
 

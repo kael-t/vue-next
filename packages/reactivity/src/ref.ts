@@ -30,6 +30,7 @@ export function isRef(r: any): r is Ref {
   return r ? r.__v_isRef === true : false
 }
 
+// TODO: ref和shallowRef的区别???
 export function ref<T extends object>(
   value: T
 ): T extends Ref ? T : Ref<UnwrapRef<T>>
@@ -39,6 +40,7 @@ export function ref(value?: unknown) {
   return createRef(value)
 }
 
+// 创建一个Ref，但是只追踪value属性，不会追踪嵌套属性的value属性
 export function shallowRef<T>(value: T): T extends Ref ? T : Ref<T>
 export function shallowRef<T = any>(): Ref<T | undefined>
 export function shallowRef(value?: unknown) {
@@ -46,6 +48,7 @@ export function shallowRef(value?: unknown) {
 }
 
 function createRef(rawValue: unknown, shallow = false) {
+  // 判断是否已经是ref类型了, 是的话直接返回
   if (isRef(rawValue)) {
     return rawValue
   }
@@ -57,10 +60,12 @@ function createRef(rawValue: unknown, shallow = false) {
   const r = {
     __v_isRef: true,
     get value() {
+      // 依赖收集
       track(r, TrackOpTypes.GET, 'value')
       return value
     },
     set value(newVal) {
+      // 新旧值都没变化的话不执行setter
       if (hasChanged(toRaw(newVal), rawValue)) {
         rawValue = newVal
         value = shallow ? newVal : convert(newVal)
@@ -76,6 +81,7 @@ function createRef(rawValue: unknown, shallow = false) {
   return r
 }
 
+// 强制触发数据变更, 可以配合shallowRef使用, shallowRef深层的修改不会触发视图变更, 可以通过triggerRef强制触发
 export function triggerRef(ref: Ref) {
   trigger(
     ref,
@@ -85,6 +91,7 @@ export function triggerRef(ref: Ref) {
   )
 }
 
+// 解开ref的包裹, 返回原值
 export function unref<T>(ref: T): T extends Ref<infer V> ? V : T {
   return isRef(ref) ? (ref.value as any) : ref
 }
@@ -97,6 +104,7 @@ export type CustomRefFactory<T> = (
   set: (value: T) => void
 }
 
+// 创建自定义依赖项, 开发者可以自己定义触发监听和更新的逻辑, 比如说追踪的变量修改后2s才触发更新
 export function customRef<T>(factory: CustomRefFactory<T>): Ref<T> {
   const { get, set } = factory(
     () => track(r, TrackOpTypes.GET, 'value'),
@@ -114,6 +122,7 @@ export function customRef<T>(factory: CustomRefFactory<T>): Ref<T> {
   return r as any
 }
 
+// toRefs接受一个响应式复杂对象, 对对象下的值进行深度监听
 export function toRefs<T extends object>(object: T): ToRefs<T> {
   if (__DEV__ && !isProxy(object)) {
     console.warn(`toRefs() expects a reactive object but received a plain one.`)

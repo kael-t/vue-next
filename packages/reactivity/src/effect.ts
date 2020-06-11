@@ -5,8 +5,26 @@ import { EMPTY_OBJ, isArray } from '@vue/shared'
 // Conceptually, it's easier to think of a dependency as a Dep class
 // which maintains a Set of subscribers, but we simply store them as
 // raw Sets to reduce memory overhead.
+/**
+ * 把targetMap想想成一下结构
+ * data: {
+ *    a: [effect1, effec2, effect3],
+ *    b: [effect3, effect4],
+ *    c: [effect5],
+ * }
+ * 其中data就是targetMap(全局唯一, 并在vue运行时不断维护)
+ * a/b/c都是KeyToDepMap保存的一个Set
+ * a/b/c对应的数组就是Dep了, 保存的是一系列的effect
+ * 假如b的effect4中依赖了c, 那么先从effect5开始, 触发了c的修改, 而c的修改触发了effect4的执行, 从而触发了b的修改
+ * dep和effect是双向查询的
+ * 可以通过keyToDepMap找到对应的dep对应的effect, 可以通过找到effect3
+ * 也可以通过effect的deps属性找到对应的dep, 如effect3的deps就包含[a,b], 所以可以通过effect3的deps找到a
+ */
+// Dep存的是一系列的订阅者(也就是effect, 可以当做Dep放的就是effect方法)
 type Dep = Set<ReactiveEffect>
+// 存的是键和依赖Set的映射
 type KeyToDepMap = Map<any, Dep>
+// 主WeakMap, 存的是收集过依赖的键
 const targetMap = new WeakMap<any, KeyToDepMap>()
 
 // 定义响应作用接口
@@ -20,7 +38,7 @@ export interface ReactiveEffect<T = any> {
   active: boolean
   // 监听函数的原始函数
   raw: () => T
-  // 暂时未知，根据名字来看是存一些依赖
+  // TODO: 暂时未知，根据名字来看是存一些依赖
   // 根据类型来看，存放是二维集合数据，一维是数组，二维是ReactiveEffect的Set集合
   deps: Array<Dep>
   options: ReactiveEffectOptions
@@ -80,7 +98,12 @@ export function effect<T = any>(
   }
   // 创建监听函数
   const effect = createReactiveEffect(fn, options)
-  // 如果没有设置lazy=false(不是惰性求值)的话, 直接调用一次
+  /**
+   * 如果没有设置lazy=false(不是惰性求值)的话, 直接调用一次, 所以
+   * const fn = () => {};
+   * effect(fn);
+   * fn会直接被执行一次
+   */
   if (!options.lazy) {
     effect()
   }
@@ -102,7 +125,7 @@ export function stop(effect: ReactiveEffect) {
     if (effect.options.onStop) {
       effect.options.onStop()
     }
-    // 把effect设置成不试用状态
+    // 把effect设置成不使用状态
     effect.active = false
   }
 }
@@ -116,9 +139,11 @@ function createReactiveEffect<T = any>(
 ): ReactiveEffect<T> {
   // 创建监听函数，通过run来包裹原始函数，做额外操作
   const effect = function reactiveEffect(...args: unknown[]): unknown {
+    // 如果effect在不使用状态的话, 判断是否传了调度方法, 传了的话返回undefined, 没传的调用回调方法并返回结果
     if (!effect.active) {
       return options.scheduler ? undefined : fn(...args)
     }
+    // 待执行effectStack中不包含当前
     if (!effectStack.includes(effect)) {
       cleanup(effect)
       try {
@@ -220,10 +245,13 @@ export function trigger(
 
   const effects = new Set<ReactiveEffect>()
   const computedRunners = new Set<ReactiveEffect>()
+  // 把effect(回调方法)加入对应的队列中(普通effect队列和计算属性队列)
   const add = (effectsToAdd: Set<ReactiveEffect> | undefined) => {
     if (effectsToAdd) {
       effectsToAdd.forEach(effect => {
+        // effect不是当前执行中的effect 或者 不需要跟踪的话
         if (effect !== activeEffect || !shouldTrack) {
+          // 如果是计算属性则加到计算属性队列, 否则加入effects队列
           if (effect.options.computed) {
             computedRunners.add(effect)
           } else {
@@ -243,7 +271,9 @@ export function trigger(
     // trigger all effects for target
     depsMap.forEach(add)
   } else if (key === 'length' && isArray(target)) {
+    // 如果收集的依赖是数组的length的话
     depsMap.forEach((dep, key) => {
+      // 判断依赖的是否是数组的length或者下标, 是的话把监听函数加到对应的队列中
       if (key === 'length' || key >= (newValue as number)) {
         add(dep)
       }
