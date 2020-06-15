@@ -15,7 +15,7 @@ import { EMPTY_OBJ, isArray } from '@vue/shared'
  * 其中data就是targetMap(全局唯一, 并在vue运行时不断维护)
  * a/b/c都是KeyToDepMap保存的一个Set
  * a/b/c对应的数组就是Dep了, 保存的是一系列的effect
- * 假如b的effect4中依赖了c, 那么先从effect5开始, 触发了c的修改, 而c的修改触发了effect4的执行, 从而触发了b的修改
+ * FIXME: 这里不对, 嵌套的effect, 子effect的执行不会造成父effect的执行 -> (假如b的effect4中依赖了c, 那么先从effect5开始, 触发了c的修改, 而c的修改触发了effect4的执行, 从而触发了b的修改)
  * dep和effect是双向查询的
  * 可以通过keyToDepMap找到对应的dep对应的effect, 可以通过找到effect3
  * 也可以通过effect的deps属性找到对应的dep, 如effect3的deps就包含[a,b], 所以可以通过effect3的deps找到a
@@ -137,13 +137,14 @@ function createReactiveEffect<T = any>(
   fn: (...args: any[]) => T,
   options: ReactiveEffectOptions
 ): ReactiveEffect<T> {
-  // 创建监听函数，通过run来包裹原始函数，做额外操作
+  // 创建监听函数
   const effect = function reactiveEffect(...args: unknown[]): unknown {
     // 如果effect在不使用状态的话, 判断是否传了调度方法, 传了的话返回undefined, 没传的调用回调方法并返回结果
     if (!effect.active) {
       return options.scheduler ? undefined : fn(...args)
     }
-    // 待执行effectStack中不包含当前
+    // TODO: 下面这部分可能是解决effect嵌套effect的问题????自己维护了一个执行栈?
+    // 待执行effectStack中不包含当前effect
     if (!effectStack.includes(effect)) {
       cleanup(effect)
       try {
@@ -184,35 +185,43 @@ function cleanup(effect: ReactiveEffect) {
 let shouldTrack = true
 const trackStack: boolean[] = []
 
-// 暂停跟踪
+// 关闭跟踪(把当前的shouldTrack状态放到栈中暂存, 把下一步的shouldTrack状态设为false, 说明下一步状态不需要收集依赖)
 export function pauseTracking() {
   trackStack.push(shouldTrack)
   shouldTrack = false
 }
 
-// TODO: 跟踪逻辑改了, 重新看看吧
+// 启用跟踪(把当前的shouldTrack状态放到栈中暂存, 把下一步的shouldTrack状态设为true, 说明下一步状态需要收集依赖)
 export function enableTracking() {
   trackStack.push(shouldTrack)
   shouldTrack = true
 }
 
+// 重置shouldTrack状态, 把shouldTrack恢复到上一步的状态
 export function resetTracking() {
   const last = trackStack.pop()
   shouldTrack = last === undefined ? true : last
 }
 
+// 依赖收集
 export function track(target: object, type: TrackOpTypes, key: unknown) {
+  // shouldTrack为false或者activeEffect不存在的话直接返回
   if (!shouldTrack || activeEffect === undefined) {
     return
   }
+  // 获取到目标对象的所有依赖映射表
   let depsMap = targetMap.get(target)
+  // 不存在的话就新建
   if (!depsMap) {
     targetMap.set(target, (depsMap = new Map()))
   }
+  // 在映射表里面取得对应的依赖Set
   let dep = depsMap.get(key)
+  // 没有的话就新建Set
   if (!dep) {
     depsMap.set(key, (dep = new Set()))
   }
+  // 依赖Set里面不包含当前的effect的话就添加到依赖Set里面, 并在activeEffect的deps属性里面添加对应的依赖(双向访问)
   if (!dep.has(activeEffect)) {
     dep.add(activeEffect)
     activeEffect.deps.push(dep)
@@ -228,6 +237,7 @@ export function track(target: object, type: TrackOpTypes, key: unknown) {
 }
 
 // 触发数据更新
+// 在targetMap中把依赖到target的所有effect找出来加到待执行effectSet中, 最后一并执行
 export function trigger(
   target: object,
   type: TriggerOpTypes,
@@ -243,15 +253,16 @@ export function trigger(
     return
   }
 
+  // 记录待执行的effect的Set(用的Set数据结构, 所以可以保证相同的effect不会重复执行)
   const effects = new Set<ReactiveEffect>()
   const computedRunners = new Set<ReactiveEffect>()
-  // 把effect(回调方法)加入对应的队列中(普通effect队列和计算属性队列)
+  // 把effect(回调方法)加入对应的Set中(普通effectSet和计算属性Set)
   const add = (effectsToAdd: Set<ReactiveEffect> | undefined) => {
     if (effectsToAdd) {
       effectsToAdd.forEach(effect => {
         // effect不是当前执行中的effect 或者 不需要跟踪的话
         if (effect !== activeEffect || !shouldTrack) {
-          // 如果是计算属性则加到计算属性队列, 否则加入effects队列
+          // 如果是计算属性则加到计算属性Set, 否则加入effects Set
           if (effect.options.computed) {
             computedRunners.add(effect)
           } else {
@@ -261,6 +272,7 @@ export function trigger(
           // the effect mutated its own dependency during its execution.
           // this can be caused by operations like foo.value++
           // do not trigger or we end in an infinite loop
+          // effect方法内部执行修改了自己的依赖的话(如: foo.value++, 此时activeEffect === effect)会导致死循环, vue的做法是不执行trigger
         }
       })
     }
@@ -269,11 +281,17 @@ export function trigger(
   if (type === TriggerOpTypes.CLEAR) {
     // collection being cleared
     // trigger all effects for target
+    // 清除的话, 目标对象的所有key的所有effect都要执行一次
     depsMap.forEach(add)
   } else if (key === 'length' && isArray(target)) {
-    // 如果收集的依赖是数组的length的话
+    // 如果收集的依赖是数组的length的话, 把length属性和大于等于newValue的项都加到对应的Set里面
+    /**
+     * 比如说原本数组为arr = [1,2,3,4], 此时length为4
+     * 执行arr.length = 6
+     * 此时arr[4], arr[5]的effect也会加到对应的Set里面去
+     */
     depsMap.forEach((dep, key) => {
-      // 判断依赖的是否是数组的length或者下标, 是的话把监听函数加到对应的队列中
+      // 判断依赖的是否是数组的length或者下标, 是的话把监听函数加到对应的Set中
       if (key === 'length' || key >= (newValue as number)) {
         add(dep)
       }
@@ -281,26 +299,30 @@ export function trigger(
   } else {
     // schedule runs for SET | ADD | DELETE
     // key不为void 0，则说明肯定是SET | ADD | DELETE这三种操作
-    // 然后将依赖这个key的所有监听函数推到相应队列中
+    // 然后将依赖这个key的所有监听函数推到相应Set中
     if (key !== void 0) {
       add(depsMap.get(key))
     }
     // also run for iteration key on ADD | DELETE | Map.SET
+    // 是否为Add和非数组的delete操作的标识
     const isAddOrDelete =
       type === TriggerOpTypes.ADD ||
       (type === TriggerOpTypes.DELETE && !isArray(target))
+    // 是add操作/非数组的delete操作/是Map的set操作的话把迭代的key(目标对象是数组的话, key为length, 不为数组的话, 开发环境为iterate, 非开发环境为'')加入到对应的Set中
     if (
       isAddOrDelete ||
       (type === TriggerOpTypes.SET && target instanceof Map)
     ) {
       add(depsMap.get(isArray(target) ? 'length' : ITERATE_KEY))
     }
+    // 如果是Map的add或者delete操作的话, 把Map key iterate的的对应的依赖加入到Set中 
     if (isAddOrDelete && target instanceof Map) {
       add(depsMap.get(MAP_KEY_ITERATE_KEY))
     }
   }
 
   const run = (effect: ReactiveEffect) => {
+    // 有onTrigger方法则执行, 调试用
     if (__DEV__ && effect.options.onTrigger) {
       effect.options.onTrigger({
         effect,
@@ -312,6 +334,7 @@ export function trigger(
         oldTarget
       })
     }
+    // 有传入调度器则把effect传给调度器, 没有的话直接调用effect
     if (effect.options.scheduler) {
       effect.options.scheduler(effect)
     } else {

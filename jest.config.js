@@ -28,6 +28,7 @@ module.exports = {
     vue: '<rootDir>/packages/vue/src'
   },
   rootDir: __dirname,
+  // 可以修改下面这里的匹配字符串, 在看源码时每次只调试你在看的部分的测试代码
   testMatch: ['<rootDir>/packages/**/__tests__/**/*spec.[jt]s?(x)'],
   testPathIgnorePatterns: process.env.SKIP_E2E
     ? // ignore example tests on netlify builds since they don't contribute
