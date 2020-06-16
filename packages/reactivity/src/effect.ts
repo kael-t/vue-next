@@ -50,7 +50,7 @@ export interface ReactiveEffectOptions {
   // 是否计算属性
   computed?: boolean
   // 调度器函数，接受的入参run即是传给effect的函数，如果传了scheduler，则可通过其调用监听函数。
-  // TODO: 这里改了入参. 再看看吧
+  // 调度器方法允许开发者自己定义触发视图更新的逻辑, 而不是每次值变更时都触发视图更新
   scheduler?: (job: ReactiveEffect) => void
   // 调试用, 在依赖收集(getter)时会被调用
   onTrack?: (event: DebuggerEvent) => void

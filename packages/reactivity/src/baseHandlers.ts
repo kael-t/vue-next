@@ -90,7 +90,6 @@ function createGetter(isReadonly = false, shallow = false) {
     const res = Reflect.get(target, key, receiver)
 
     // 如果key是js内置的Symbols或者__proto__属性, 则取原生的, 也就是说vue不会收集builtInSymbols的依赖
-    // 这里是因为Map/WeakMap/Object等以symbol作为键时, Reflect.get无法取到
     if ((isSymbol(key) && builtInSymbols.has(key)) || key === '__proto__') {
       return res
     }
