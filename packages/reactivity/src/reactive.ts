@@ -45,7 +45,7 @@ const isObservableType = /*#__PURE__*/ makeMap(
 // 3. 没有被冻结(传入对象没有被frozen)
 const canObserve = (value: Target): boolean => {
   return (
-    !value.__v_skip &&
+    !value[ReactiveFlags.skip] &&
     isObservableType(toRawType(value)) &&
     !Object.isFrozen(value)
   )
@@ -58,7 +58,7 @@ export function reactive<T extends object>(target: T): UnwrapNestedRefs<T>
 export function reactive(target: object) {
   // if trying to observe a readonly proxy, return the readonly version.
   // 如果对已经是readonly的响应式对象进行reactive, 直接返回readonly版本的对象
-  if (target && (target as Target).__v_isReadonly) {
+  if (target && (target as Target)[ReactiveFlags.isReadonly]) {
     return target
   }
   // 创建reactive响应式对象
@@ -132,14 +132,19 @@ function createReactiveObject(
   }
   // target is already a Proxy, return it.
   // exception: calling readonly() on a reactive object
-  if (target.__v_raw && !(isReadonly && target.__v_isReactive)) {
+  if (
+    target[ReactiveFlags.raw] &&
+    !(isReadonly && target[ReactiveFlags.isReactive])
+  ) {
     return target
   }
   // target already has corresponding Proxy
   if (
     hasOwn(target, isReadonly ? ReactiveFlags.readonly : ReactiveFlags.reactive)
   ) {
-    return isReadonly ? target.__v_readonly : target.__v_reactive
+    return isReadonly
+      ? target[ReactiveFlags.readonly]
+      : target[ReactiveFlags.reactive]
   }
   // only a whitelist of value types can be observed.
   // 如果不在能设置成响应式的白名单之内的, 直接返回target
@@ -163,14 +168,14 @@ function createReactiveObject(
 // TODO: 对响应式对象设置readonly代理?? 对readonly对象再做readonly代理??? 千层塔???
 export function isReactive(value: unknown): boolean {
   if (isReadonly(value)) {
-    return isReactive((value as Target).__v_raw)
+    return isReactive((value as Target)[ReactiveFlags.raw])
   }
-  return !!(value && (value as Target).__v_isReactive)
+  return !!(value && (value as Target)[ReactiveFlags.isReactive])
 }
 
 // value是否为readonly的(查看__v_isReadonly的值)
 export function isReadonly(value: unknown): boolean {
-  return !!(value && (value as Target).__v_isReadonly)
+  return !!(value && (value as Target)[ReactiveFlags.isReadonly])
 }
 
 // 简单说就是__v_isReactive/__v_isReadonly标志有一个为true的就是isProxy
@@ -180,7 +185,9 @@ export function isProxy(value: unknown): boolean {
 
 // 取得代理对象的原值
 export function toRaw<T>(observed: T): T {
-  return (observed && toRaw((observed as Target).__v_raw)) || observed
+  return (
+    (observed && toRaw((observed as Target)[ReactiveFlags.raw])) || observed
+  )
 }
 
 // 把__v_skip标志设置成true, 表明这个对象不会被vue劫持代理, 也就是标志这个值为raw的

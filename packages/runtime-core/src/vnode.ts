@@ -32,6 +32,7 @@ import { TeleportImpl, isTeleport } from './components/Teleport'
 import { currentRenderingInstance } from './componentRenderUtils'
 import { RendererNode, RendererElement } from './renderer'
 import { NULL_DYNAMIC_COMPONENT } from './helpers/resolveAssets'
+import { hmrDirtyComponents } from './hmr'
 
 export const Fragment = (Symbol(__DEV__ ? 'Fragment' : undefined) as any) as {
   __isFragment: true
@@ -120,7 +121,7 @@ export interface VNode<HostNode = RendererNode, HostElement = RendererElement> {
   component: ComponentInternalInstance | null
   suspense: SuspenseBoundary | null
   dirs: DirectiveBinding[] | null
-  transition: TransitionHooks | null
+  transition: TransitionHooks<HostElement> | null
 
   // DOM
   el: HostNode | null
@@ -236,7 +237,7 @@ export function isSameVNodeType(n1: VNode, n2: VNode): boolean {
   if (
     __DEV__ &&
     n2.shapeFlag & ShapeFlags.COMPONENT &&
-    (n2.type as Component).__hmrUpdated
+    hmrDirtyComponents.has(n2.type as Component)
   ) {
     // HMR only: if the component has been hot-updated, force a reload.
     return false
@@ -276,12 +277,13 @@ export const InternalObjectKey = `__vInternal`
 const normalizeKey = ({ key }: VNodeProps): VNode['key'] =>
   key != null ? key : null
 
-const normalizeRef = ({ ref }: VNodeProps): VNode['ref'] =>
-  (ref != null
+const normalizeRef = ({ ref }: VNodeProps): VNode['ref'] => {
+  return (ref != null
     ? isArray(ref)
       ? ref
       : [currentRenderingInstance!, ref]
     : null) as any
+}
 
 export const createVNode = (__DEV__
   ? createVNodeWithArgsTransform
@@ -419,7 +421,7 @@ export function cloneVNode<T, U>(
     type: vnode.type,
     props,
     key: props && normalizeKey(props),
-    ref: props && normalizeRef(props),
+    ref: extraProps && extraProps.ref ? normalizeRef(extraProps) : vnode.ref,
     scopeId: vnode.scopeId,
     children: vnode.children,
     target: vnode.target,

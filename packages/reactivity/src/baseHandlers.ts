@@ -75,7 +75,13 @@ function createGetter(isReadonly = false, shallow = false) {
     } else if (key === ReactiveFlags.isReadonly) {
       // 返回__v_isReadonly的值
       return isReadonly
-    } else if (key === ReactiveFlags.raw) {
+    } else if (
+      key === ReactiveFlags.raw &&
+      receiver ===
+        (isReadonly
+          ? (target as any).__v_readonly
+          : (target as any).__v_reactive)
+    ) {
       // 返回原值
       return target
     }
@@ -94,35 +100,30 @@ function createGetter(isReadonly = false, shallow = false) {
       return res
     }
 
+    if (!isReadonly) {
+      track(target, TrackOpTypes.GET, key)
+    }
+
     // 如果shallow为true, 对目标进行依赖收集(shallowGet)
     if (shallow) {
-      !isReadonly && track(target, TrackOpTypes.GET, key)
       return res
     }
 
     // 判断取到的值是否为Ref的
     if (isRef(res)) {
-      if (targetIsArray) {
-        // 如果目标是数组且没有被设置为只读, 则对其进行依赖收集(get/shallowGet)
-        !isReadonly && track(target, TrackOpTypes.GET, key)
-        return res
-      } else {
-        // 直接将Ref解包
-        // ref unwrapping, only for Objects, not for Arrays.
-        return res.value
-      }
+      // ref unwrapping, only for Objects, not for Arrays.
+      // Ref在数组内的话返回Ref对象, 否则返回解包后的值
+      return targetIsArray ? res : res.value
     }
 
-    // 不是ref也不为只读的, 进行依赖收集(get/shallowGet)
-    !isReadonly && track(target, TrackOpTypes.GET, key)
-    // 结果是对象则根据isReadonly返回只读或响应式版本的结果, 否则返回原值
-    return isObject(res)
-      ? isReadonly
-        ? // need to lazy access readonly and reactive here to avoid
-          // circular dependency
-          readonly(res)
-        : reactive(res)
-      : res
+    if (isObject(res)) {
+      // Convert returned value into a proxy as well. we do the isObject check
+      // here to avoid invalid value warning. Also need to lazy access readonly
+      // and reactive here to avoid circular dependency.
+      return isReadonly ? readonly(res) : reactive(res)
+    }
+
+    return res
   }
 }
 

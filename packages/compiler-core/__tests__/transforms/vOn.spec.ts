@@ -167,7 +167,7 @@ describe('compiler: transform v-on', () => {
     })
   })
 
-  test('should handle multiple line statement', () => {
+  test('should handle multi-line statement', () => {
     const { node } = parseWithVOn(`<div @click="\nfoo();\nbar()\n"/>`)
     expect((node.codegenNode as VNodeCall).props).toMatchObject({
       properties: [
@@ -400,7 +400,11 @@ describe('compiler: transform v-on', () => {
         index: 1,
         value: {
           type: NodeTypes.COMPOUND_EXPRESSION,
-          children: [`$event => (`, { content: `_ctx.foo($event)` }, `)`]
+          children: [
+            `($event, ...args) => (`,
+            { content: `_ctx.foo($event, ...args)` },
+            `)`
+          ]
         }
       })
     })
