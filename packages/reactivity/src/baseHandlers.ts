@@ -38,7 +38,6 @@ const readonlyGet = /*#__PURE__*/ createGetter(true)
 const shallowReadonlyGet = /*#__PURE__*/ createGetter(true, true)
 
 const arrayInstrumentations: Record<string, Function> = {}
-// 劫持一下三个方法(非高阶方法, 高阶方法不会有问题(或者需要开发者自己进行业务代码处理))
 ;['includes', 'indexOf', 'lastIndexOf'].forEach(key => {
   arrayInstrumentations[key] = function(...args: any[]): any {
     const arr = toRaw(this) as any
@@ -53,6 +52,9 @@ const arrayInstrumentations: Record<string, Function> = {}
     //             如[1, customRef(2), 3], 其中customRef(2)的getter被设置为return -1
     const res = arr[key](...args)
     if (res === -1 || res === false) {
+      // 防止上面方法接收到的参数是Reactive的情况
+      // 如果参数是Reactive的, 但数组上的不是, 可能会出现查找失败的问题
+      // 如: [1,2,3,4].includes(Ref(4))
       // if that didn't work, run it again using raw values.
       return arr[key](...args.map(toRaw))
     } else {
@@ -62,6 +64,7 @@ const arrayInstrumentations: Record<string, Function> = {}
 })
 
 // 创建getter方法, 通过闭包分别报错了isReadonly和shallow的值
+// shallow的true和false表明是浅响应还是响应式, 浅响应的话, 深层对象改变不会被收集
 // get: isReadonly->false  shallow->false
 // shallowGet:  isReadonly->false  shallow->true
 // readonlyGet:  isReadonly->true  shallow->false
@@ -104,7 +107,8 @@ function createGetter(isReadonly = false, shallow = false) {
       track(target, TrackOpTypes.GET, key)
     }
 
-    // 如果shallow为true, 对目标进行依赖收集(shallowGet)
+    // 如果shallow为true, 返回取到的值(可能是响应式对象, 也可能不是)
+    // 如果shallow为false: Ref对象的话返回原值, 否则返回响应式对象
     if (shallow) {
       return res
     }
@@ -156,6 +160,7 @@ function createSetter(shallow = false) {
     const result = Reflect.set(target, key, value, receiver)
     // don't trigger if target is something up in the prototype chain of original
     // 在目标对象和receiver原对象为同一引用的时候才触发视图更新(解决特殊情况下重复触发视图更新的问题)
+    // 也就是说, 修改到的不是对象上而是原型链上的值的话并不会trigger
     if (target === toRaw(receiver)) {
       // 目标对象上没有key, 触发add操作; 否则判断新旧值是否有变化, 有的话触发set操作
       if (!hadKey) {
@@ -183,6 +188,7 @@ function deleteProperty(target: object, key: string | symbol): boolean {
 }
 
 // has trap
+// 主要针对in操作符的代理方法
 function has(target: object, key: string | symbol): boolean {
   const result = Reflect.has(target, key)
   track(target, TrackOpTypes.HAS, key)
@@ -190,6 +196,7 @@ function has(target: object, key: string | symbol): boolean {
 }
 
 // ownKeys trap
+// 主要用于拦截 Object.getOwnPropertyNames/Object.getOwnPropertySymbols/Object.keys/for...in循环等等
 function ownKeys(target: object): (string | number | symbol)[] {
   track(target, TrackOpTypes.ITERATE, ITERATE_KEY)
   return Reflect.ownKeys(target)

@@ -30,7 +30,6 @@ export function isRef(r: any): r is Ref {
   return r ? r.__v_isRef === true : false
 }
 
-// TODO: ref和shallowRef的区别???
 export function ref<T extends object>(
   value: T
 ): T extends Ref ? T : Ref<UnwrapRef<T>>
@@ -53,14 +52,16 @@ function createRef(rawValue: unknown, shallow = false) {
     return rawValue
   }
   // 如果shallow为false, 把原对象转换为响应式对象
+  // shallowRef和ref的区别在于: 当rawValue为isObject时
+  // ref会对深层的属性调用reactive(), 也就是会把属性也转成响应式
+  // 而shallowRef不会把深层的属性属性转成响应式, 而只是新建一个对象, 把外层对象放在新对象的value属性中, 并对收集外层对象的依赖
+  // 原值不为引用类型时, 其实ref和shallowRef是等价的
   let value = shallow ? rawValue : convert(rawValue)
-  // 返回一个Ref实例
-  // 包含一个refSymbol属性, 标识为ref的实例
-  // 包含一个value属性, 可以存取
+  // 新建一个对象, 包含__v_isRef和value两个属性, 并设置了value的get,set, 这里没有用到proxy, 而是直接设置了value属性的getter/setter
   const r = {
     __v_isRef: true,
     get value() {
-      // 依赖收集
+      // 依赖新建对象的收集
       track(r, TrackOpTypes.GET, 'value')
       return value
     },
@@ -105,6 +106,20 @@ export type CustomRefFactory<T> = (
 }
 
 // 创建自定义依赖项, 开发者可以自己定义触发监听和更新的逻辑, 比如说追踪的变量修改后2s才触发更新
+/**
+ * 例子: 修改值后200ms才触发视图更新, 可以很容易实现debounce功能
+ * const myRef = (value) => customRef((track, trigger) => ({
+ *    get: function () {
+ *        console.log('get')
+ *        track()
+ *        return value;
+ *    },
+ *    set: function (newValue) {
+ *        console.log(set)
+ *        setTimeout(() => trigger(), 200)
+ *    }
+ * }))
+ */
 export function customRef<T>(factory: CustomRefFactory<T>): Ref<T> {
   const { get, set } = factory(
     () => track(r, TrackOpTypes.GET, 'value'),

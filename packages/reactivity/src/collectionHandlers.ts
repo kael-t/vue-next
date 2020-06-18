@@ -21,10 +21,11 @@ type WeakCollections = WeakMap<any, any> | WeakSet<any>
 type MapTypes = Map<any, any> | WeakMap<any, any>
 type SetTypes = Set<any> | WeakSet<any>
 
-// 转成响应式或者只读对象的方法
+// 转成响应式对象方法
 const toReactive = <T extends unknown>(value: T): T =>
   isObject(value) ? reactive(value) : value
 
+// 转成只读对象方法
 const toReadonly = <T extends unknown>(value: T): T =>
   isObject(value) ? readonly(value) : value
 
@@ -44,6 +45,11 @@ function get(
   // 取得对象的原始数据
   target = toRaw(target)
   const rawKey = toRaw(key)
+  /**
+   * const ref = Ref(1)
+   * map = new Map([['age', 24], [ref, 1]])
+   * 这时会同时收集map[Ref(1)], 和map[1]的依赖
+   */
   if (key !== rawKey) {
     track(target, TrackOpTypes.GET, key)
   }
@@ -99,6 +105,7 @@ function set(this: MapTypes, key: unknown, value: unknown) {
     key = toRaw(key)
     hadKey = has.call(target, key)
   } else if (__DEV__) {
+    // 在dev环境下检查key是否是响应式对象, 是的话发出警告
     checkIdentityKeys(target, has, key)
   }
 
@@ -117,6 +124,7 @@ function deleteEntry(this: CollectionTypes, key: unknown) {
   const { has, get, delete: del } = getProto(target)
   let hadKey = has.call(target, key)
   if (!hadKey) {
+    // 处理key可能为响应式对象的问题, 要取raw值后重新调用has方法
     key = toRaw(key)
     hadKey = has.call(target, key)
   } else if (__DEV__) {
@@ -148,6 +156,8 @@ function clear(this: IterableCollections) {
   return result
 }
 
+
+// 创建forEach方法
 function createForEach(isReadonly: boolean, shallow: boolean) {
   return function forEach(
     this: IterableCollections,
@@ -163,7 +173,9 @@ function createForEach(isReadonly: boolean, shallow: boolean) {
     // important: create sure the callback is
     // 1. invoked with the reactive map as `this` and 3rd arg
     // 2. the value received should be a corresponding reactive/readonly.
-    // 增强传递进来的callback方法，让传入callback的数据，转为响应式数据
+    // 调用者需要为响应式的, 第三个参数也需要为响应式的
+    // 传给callback的参数也是响应式的
+    // 包裹传递进来的callback方法，让传入callback的数据，转为响应式数据
     function wrappedCallback(value: unknown, key: unknown) {
       return callback.call(thisArg, wrap(value), wrap(key), observed)
     }
@@ -171,7 +183,9 @@ function createForEach(isReadonly: boolean, shallow: boolean) {
   }
 }
 
-// 创建迭代器方法
+// 创建keys/values/entries迭代器方法
+// 以上高阶方法中callback中拿到的参数都是响应式版本的
+// 也就是说 new Map([['a', 1]]).values(item => item = 2)这种写法是能直接触发effect的
 function createIterableMethod(
   method: string | symbol,
   isReadonly: boolean,
@@ -199,6 +213,7 @@ function createIterableMethod(
     // return a wrapped iterator which returns observed versions of the
     // values emitted from the real iterator
     // 返回一个包装过的iterator, 将其值转为响应式数据
+    // 要实现迭代器协议, 才能让浏览器正确执行迭代器方法
     return {
       // iterator protocol
       next() {
@@ -299,6 +314,7 @@ iteratorMethods.forEach(method => {
   )
 })
 
+// 创建get handler的控制器方法, 分别返回shallowInstrumentations/readonlyInstrumentations/mutableInstrumentations
 // 创建getter函数
 function createInstrumentationGetter(isReadonly: boolean, shallow: boolean) {
   const instrumentations = shallow
@@ -323,7 +339,7 @@ function createInstrumentationGetter(isReadonly: boolean, shallow: boolean) {
 
     // 如果instrumentations中有这个key, 且target中也有
     // 用instrumentations作为反射get的对象, 否则用target的
-    // FIXME: 其实就是get, size, has, add, set, delete, clear, forEach采用mutableInstrumentations, readonlyInstrumentations对象上的
+    // 其实就是get, size, has, add, set, delete, clear, forEach, keys, values, entries采用mutableInstrumentations, readonlyInstrumentations对象上的
     // 而其他的采用target原始对象上的
     return Reflect.get(
       hasOwn(instrumentations, key) && key in target
@@ -336,7 +352,7 @@ function createInstrumentationGetter(isReadonly: boolean, shallow: boolean) {
 }
 
 // 这里只劫持一个get trap是因为: 
-// 如果直接劫持collections的set trap, 调用时会报 Uncaught TypeError: Method Set.prototype.add called on incompatible receiver [object Object]
+// 如果直接劫持collections的set trap, 赋值时会报 Uncaught TypeError: Method Set.prototype.add called on incompatible receiver [object Object]
 // Reflect会通过this对target进行操作, Reflect中的this其实指向的是proxy而非原始的target
 // 导致设置collections的设值操作失败, 这也是为什么collection需要特殊handlers的原因
 // 详情可看: https://javascript.info/proxy#proxy-limitations

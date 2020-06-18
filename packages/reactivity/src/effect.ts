@@ -15,10 +15,9 @@ import { EMPTY_OBJ, isArray } from '@vue/shared'
  * 其中data就是targetMap(全局唯一, 并在vue运行时不断维护)
  * a/b/c都是KeyToDepMap保存的一个Set
  * a/b/c对应的数组就是Dep了, 保存的是一系列的effect
- * FIXME: 这里不对, 嵌套的effect, 子effect的执行不会造成父effect的执行 -> (假如b的effect4中依赖了c, 那么先从effect5开始, 触发了c的修改, 而c的修改触发了effect4的执行, 从而触发了b的修改)
  * dep和effect是双向查询的
  * 可以通过keyToDepMap找到对应的dep对应的effect, 可以通过找到effect3
- * 也可以通过effect的deps属性找到对应的dep, 如effect3的deps就包含[a,b], 所以可以通过effect3的deps找到a
+ * 也可以通过effect的deps属性找到对应的dep, 如effect3的deps就包含[a,b], 所以可以通过effect3的deps属性找到a
  */
 // Dep存的是一系列的订阅者(也就是effect, 可以当做Dep放的就是effect方法)
 type Dep = Set<ReactiveEffect>
@@ -38,8 +37,7 @@ export interface ReactiveEffect<T = any> {
   active: boolean
   // 监听函数的原始函数
   raw: () => T
-  // TODO: 暂时未知，根据名字来看是存一些依赖
-  // 根据类型来看，存放是二维集合数据，一维是数组，二维是ReactiveEffect的Set集合
+  // 根据类型来看，存放是二维集合数据，一维是数组，二维是ReactiveEffect的Set集合[Set([effect1, effect2])]
   deps: Array<Dep>
   options: ReactiveEffectOptions
 }
@@ -143,7 +141,24 @@ function createReactiveEffect<T = any>(
     if (!effect.active) {
       return options.scheduler ? undefined : fn(...args)
     }
-    // TODO: 下面这部分可能是解决effect嵌套effect的问题????自己维护了一个执行栈?
+    /**
+     * effect嵌套effect的问题, 维护了一个简易的runtime状态栈
+     * 如何解决effect嵌套effect的问题, 看以下代码
+     * const nums = reactive({ foo: 'fooValue', bar: 'barValue' })
+     * const dummy = {}
+     * const childEffect = effect(() => {
+     *    console.log('childEffect called')
+     *    dummy.foo = nums.foo
+     * })
+     * const parentEffect = effect(() => {
+     *    console.log('parentEffect called')
+     *    dummy.bar = nums.bar
+     *    childEffect()
+     * })
+     * parentEffect订阅了nums.bar, childEffect订阅了nums.foo
+     * 这时我们执行: nums.bar = newBar
+     * parentEffect就会被触发, 因此在里面的childEffect也会被触发
+     */
     // 待执行effectStack中不包含当前effect
     if (!effectStack.includes(effect)) {
       cleanup(effect)
@@ -343,6 +358,12 @@ export function trigger(
   }
   // Important: computed effects must be run first so that computed getters
   // can be invalidated before any normal effects that depend on them are run.
+  /**
+   * 这里computedRunners要先于effects执行是因为:
+   * 因为computedEffect是惰性求值的, 如果effects中依赖到了computed的属性, 而effects先于computeRunners执行的话
+   * 就会导致computed属性在被effects依赖到了, 所以执行effect时调用了computed的getter, 导致computed属性求值了
+   * 然后再执行computedRunner, 这时候effect依赖到的computed属性又dirty了, 导致effect求值结果出错了
+   */
   // 运行计算属性的监听方法
   computedRunners.forEach(run)
   // 运行正常的监听方法

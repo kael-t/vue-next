@@ -56,10 +56,18 @@ export function computed<T>(
     lazy: true,
     // mark effect as computed so that it gets priority during trigger
     // 标识为computed来确定触发时候的优先级
+    // 详情可以看effect.ts, 在trigger的时候, 标识为computed的会先于普通的effect执行
     computed: true,
-    // 调度函数, 所有跟这个computed有关的依赖变更, 最后都会调用一次这个方法
+    // 调度函数, 所有跟这个computed有关的依赖变更, 都会调用一次这个方法
     // 使得这个computed的dirty=true, 然后每次调用computed的getter时检测dirty
     // 一旦dirty为true, 则调用getter更新computed的值, computed的求值是惰性的, 跟vue2.x一致
+    /**
+     * const times = ref(0)
+     * count count = computed(() => times + 1)
+     * times += 1
+     * 每当times变化的时候就会调用scheduler是的count的dirty为true
+     * 当取count值时就会调用computed的cb进行惰性求值
+     */
     scheduler: () => {
       if (!dirty) {
         dirty = true
