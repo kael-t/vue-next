@@ -19,7 +19,7 @@ export interface WritableComputedOptions<T> {
   set: ComputedSetter<T>
 }
 
-// 这个是computed是函数时的方法, 如果是方法的话, 返回值是ComputedRef
+// 这个是computed是函数时的方法, 如果是方法的话, 返回值是ComputedRef, 注意: computed返回的是Ref
 export function computed<T>(getter: ComputedGetter<T>): ComputedRef<T>
 // 这个是当computed是对象时的方法, 如果是对象的话, 返回值是WritableComputedOptions, 因为有可能有setter, writeable
 export function computed<T>(
