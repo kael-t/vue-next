@@ -14,22 +14,22 @@ import { UnwrapRef, Ref } from './ref'
 
 // 定义一些属性枚举
 export const enum ReactiveFlags {
-  skip = '__v_skip',
-  isReactive = '__v_isReactive',
-  isReadonly = '__v_isReadonly',
-  raw = '__v_raw',
-  reactive = '__v_reactive',
-  readonly = '__v_readonly'
+  SKIP = '__v_skip',
+  IS_REACTIVE = '__v_isReactive',
+  IS_READONLY = '__v_isReadonly',
+  RAW = '__v_raw',
+  REACTIVE = '__v_reactive',
+  READONLY = '__v_readonly'
 }
 
 // 定义一些属性标识
 interface Target {
-  __v_skip?: boolean // Vue3的VNode都带有__v_skip: true标识, 该属性为true说明是Vue3的VNode
-  __v_isReactive?: boolean // 标识是否是响应式的
-  __v_isReadonly?: boolean // 标识是否是只读的
-  __v_raw?: any
-  __v_reactive?: any
-  __v_readonly?: any
+  [ReactiveFlags.SKIP]?: boolean // Vue3的VNode都带有__v_skip: true标识, 该属性为true说明是Vue3的VNode
+  [ReactiveFlags.IS_REACTIVE]?: boolean // 标识是否是响应式的
+  [ReactiveFlags.IS_READONLY]?: boolean // 标识是否是只读的
+  [ReactiveFlags.RAW]?: any
+  [ReactiveFlags.REACTIVE]?: any
+  [ReactiveFlags.READONLY]?: any
 }
 
 // 集合类型: Set/Map/WeakSet/WeakMap, 响应式值的类型'[object {Object|Array|Map|Set|WeakMap|WeakSet}]'
@@ -45,9 +45,9 @@ const isObservableType = /*#__PURE__*/ makeMap(
 // 3. 没有被冻结(传入对象没有被frozen)
 const canObserve = (value: Target): boolean => {
   return (
-    !value[ReactiveFlags.skip] &&
+    !value[ReactiveFlags.SKIP] &&
     isObservableType(toRawType(value)) &&
-    !Object.isFrozen(value)
+    Object.isExtensible(value)
   )
 }
 
@@ -58,7 +58,7 @@ export function reactive<T extends object>(target: T): UnwrapNestedRefs<T>
 export function reactive(target: object) {
   // if trying to observe a readonly proxy, return the readonly version.
   // 如果对已经是readonly的响应式对象进行reactive, 直接返回readonly版本的对象
-  if (target && (target as Target)[ReactiveFlags.isReadonly]) {
+  if (target && (target as Target)[ReactiveFlags.IS_READONLY]) {
     return target
   }
   // 创建reactive响应式对象
@@ -83,9 +83,31 @@ export function shallowReactive<T extends object>(target: T): T {
   )
 }
 
+type Primitive = string | number | boolean | bigint | symbol | undefined | null
+type Builtin = Primitive | Function | Date | Error | RegExp
+export type DeepReadonly<T> = T extends Builtin
+  ? T
+  : T extends Map<infer K, infer V>
+    ? ReadonlyMap<DeepReadonly<K>, DeepReadonly<V>>
+    : T extends ReadonlyMap<infer K, infer V>
+      ? ReadonlyMap<DeepReadonly<K>, DeepReadonly<V>>
+      : T extends WeakMap<infer K, infer V>
+        ? WeakMap<DeepReadonly<K>, DeepReadonly<V>>
+        : T extends Set<infer U>
+          ? ReadonlySet<DeepReadonly<U>>
+          : T extends ReadonlySet<infer U>
+            ? ReadonlySet<DeepReadonly<U>>
+            : T extends WeakSet<infer U>
+              ? WeakSet<DeepReadonly<U>>
+              : T extends Promise<infer U>
+                ? Promise<DeepReadonly<U>>
+                : T extends {}
+                  ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+                  : Readonly<T>
+
 export function readonly<T extends object>(
   target: T
-): Readonly<UnwrapNestedRefs<T>> {
+): DeepReadonly<UnwrapNestedRefs<T>> {
   return createReactiveObject(
     target,
     true,
@@ -133,18 +155,17 @@ function createReactiveObject(
   // target is already a Proxy, return it.
   // exception: calling readonly() on a reactive object
   if (
-    target[ReactiveFlags.raw] &&
-    !(isReadonly && target[ReactiveFlags.isReactive])
+    target[ReactiveFlags.RAW] &&
+    !(isReadonly && target[ReactiveFlags.IS_REACTIVE])
   ) {
     return target
   }
   // target already has corresponding Proxy
-  if (
-    hasOwn(target, isReadonly ? ReactiveFlags.readonly : ReactiveFlags.reactive)
-  ) {
-    return isReadonly
-      ? target[ReactiveFlags.readonly]
-      : target[ReactiveFlags.reactive]
+  const reactiveFlag = isReadonly
+    ? ReactiveFlags.READONLY
+    : ReactiveFlags.REACTIVE
+  if (hasOwn(target, reactiveFlag)) {
+    return target[reactiveFlag]
   }
   // only a whitelist of value types can be observed.
   // 如果不在能设置成响应式的白名单之内的, 直接返回target
@@ -156,11 +177,7 @@ function createReactiveObject(
     collectionTypes.has(target.constructor) ? collectionHandlers : baseHandlers
   )
   // 把创建的响应式对象存在对应的__v_reactive 或 __v_readonly中
-  def(
-    target,
-    isReadonly ? ReactiveFlags.readonly : ReactiveFlags.reactive,
-    observed
-  )
+  def(target, reactiveFlag, observed)
   return observed
 }
 
@@ -168,14 +185,14 @@ function createReactiveObject(
 // TODO: 对响应式对象设置readonly代理?? 对readonly对象再做readonly代理??? 千层塔???
 export function isReactive(value: unknown): boolean {
   if (isReadonly(value)) {
-    return isReactive((value as Target)[ReactiveFlags.raw])
+    return isReactive((value as Target)[ReactiveFlags.RAW])
   }
-  return !!(value && (value as Target)[ReactiveFlags.isReactive])
+  return !!(value && (value as Target)[ReactiveFlags.IS_REACTIVE])
 }
 
 // value是否为readonly的(查看__v_isReadonly的值)
 export function isReadonly(value: unknown): boolean {
-  return !!(value && (value as Target)[ReactiveFlags.isReadonly])
+  return !!(value && (value as Target)[ReactiveFlags.IS_READONLY])
 }
 
 // 简单说就是__v_isReactive/__v_isReadonly标志有一个为true的就是isProxy
@@ -186,12 +203,12 @@ export function isProxy(value: unknown): boolean {
 // 取得代理对象的原值
 export function toRaw<T>(observed: T): T {
   return (
-    (observed && toRaw((observed as Target)[ReactiveFlags.raw])) || observed
+    (observed && toRaw((observed as Target)[ReactiveFlags.RAW])) || observed
   )
 }
 
 // 把__v_skip标志设置成true, 表明这个对象不会被vue劫持代理, 也就是标志这个值为raw的
 export function markRaw<T extends object>(value: T): T {
-  def(value, ReactiveFlags.skip, true)
+  def(value, ReactiveFlags.SKIP, true)
   return value
 }

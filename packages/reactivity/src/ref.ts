@@ -1,8 +1,7 @@
 import { track, trigger } from './effect'
 import { TrackOpTypes, TriggerOpTypes } from './operations'
 import { isObject, hasChanged } from '@vue/shared'
-import { reactive, isProxy, toRaw } from './reactive'
-import { ComputedRef } from './computed'
+import { reactive, isProxy, toRaw, isReactive } from './reactive'
 import { CollectionTypes } from './collectionHandlers'
 
 declare const RefSymbol: unique symbol
@@ -70,12 +69,7 @@ function createRef(rawValue: unknown, shallow = false) {
       if (hasChanged(toRaw(newVal), rawValue)) {
         rawValue = newVal
         value = shallow ? newVal : convert(newVal)
-        trigger(
-          r,
-          TriggerOpTypes.SET,
-          'value',
-          __DEV__ ? { newValue: newVal } : void 0
-        )
+        trigger(r, TriggerOpTypes.SET, 'value', newVal)
       }
     }
   }
@@ -84,17 +78,33 @@ function createRef(rawValue: unknown, shallow = false) {
 
 // 强制触发数据变更, 可以配合shallowRef使用, shallowRef深层的修改不会触发视图变更, 可以通过triggerRef强制触发
 export function triggerRef(ref: Ref) {
-  trigger(
-    ref,
-    TriggerOpTypes.SET,
-    'value',
-    __DEV__ ? { newValue: ref.value } : void 0
-  )
+  trigger(ref, TriggerOpTypes.SET, 'value', __DEV__ ? ref.value : void 0)
 }
 
 // 解开ref的包裹, 返回原值
 export function unref<T>(ref: T): T extends Ref<infer V> ? V : T {
   return isRef(ref) ? (ref.value as any) : ref
+}
+
+const shallowUnwrapHandlers: ProxyHandler<any> = {
+  get: (target, key, receiver) => unref(Reflect.get(target, key, receiver)),
+  set: (target, key, value, receiver) => {
+    const oldValue = target[key]
+    if (isRef(oldValue) && !isRef(value)) {
+      oldValue.value = value
+      return true
+    } else {
+      return Reflect.set(target, key, value, receiver)
+    }
+  }
+}
+
+export function proxyRefs<T extends object>(
+  objectWithRefs: T
+): ShallowUnwrapRef<T> {
+  return isReactive(objectWithRefs)
+    ? objectWithRefs
+    : new Proxy(objectWithRefs, shallowUnwrapHandlers)
 }
 
 export type CustomRefFactory<T> = (
@@ -184,15 +194,19 @@ type BaseTypes = string | number | boolean
  * }
  * ```
  *
- * Note that api-extractor somehow refuses to include `decalre module`
+ * Note that api-extractor somehow refuses to include `declare module`
  * augmentations in its generated d.ts, so we have to manually append them
  * to the final generated d.ts in our build process.
  */
 export interface RefUnwrapBailTypes {}
 
-export type UnwrapRef<T> = T extends ComputedRef<infer V>
+export type ShallowUnwrapRef<T> = {
+  [K in keyof T]: T[K] extends Ref<infer V> ? V : T[K]
+}
+
+export type UnwrapRef<T> = T extends Ref<infer V>
   ? UnwrapRefSimple<V>
-  : T extends Ref<infer V> ? UnwrapRefSimple<V> : UnwrapRefSimple<T>
+  : UnwrapRefSimple<T>
 
 type UnwrapRefSimple<T> = T extends
   | Function
@@ -201,7 +215,9 @@ type UnwrapRefSimple<T> = T extends
   | Ref
   | RefUnwrapBailTypes[keyof RefUnwrapBailTypes]
   ? T
-  : T extends Array<any> ? T : T extends object ? UnwrappedObject<T> : T
+  : T extends Array<any>
+    ? { [K in keyof T]: UnwrapRefSimple<T[K]> }
+    : T extends object ? UnwrappedObject<T> : T
 
 // Extract all known symbols from an object
 // when unwrapping Object the symbols are not `in keyof`, this should cover all the

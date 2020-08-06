@@ -6,7 +6,10 @@ import {
   reactive,
   createApp,
   expectError,
-  expectType
+  expectType,
+  ComponentPublicInstance,
+  ComponentOptions,
+  SetupContext
 } from './index'
 
 describe('with object props', () => {
@@ -143,7 +146,7 @@ describe('with object props', () => {
 
       // assert setup context unwrapping
       expectType<number>(this.c)
-      expectType<string>(this.d.e)
+      expectType<string>(this.d.e.value)
       expectType<GT>(this.f.g)
 
       // setup context properties should be mutable
@@ -168,8 +171,9 @@ describe('with object props', () => {
       eee={() => ({ a: 'eee' })}
       fff={(a, b) => ({ a: a > +b })}
       hhh={false}
-      // should allow extraneous as attrs
+      // should allow class/style as attrs
       class="bar"
+      style={{ color: 'red' }}
       // should allow key
       key={'foo'}
       // should allow ref
@@ -265,6 +269,19 @@ describe('type inference w/ options API', () => {
       d(): number {
         expectType<number>(this.b)
         return this.b + 1
+      },
+      e: {
+        get(): number {
+          expectType<number>(this.b)
+          expectType<number>(this.d)
+
+          return this.b + this.d
+        },
+        set(v: number) {
+          expectType<number>(this.b)
+          expectType<number>(this.d)
+          expectType<number>(v)
+        }
       }
     },
     watch: {
@@ -282,6 +299,8 @@ describe('type inference w/ options API', () => {
       expectType<number>(this.c)
       // computed
       expectType<number>(this.d)
+      // computed get/set
+      expectType<number>(this.e)
     },
     methods: {
       doSomething() {
@@ -293,6 +312,11 @@ describe('type inference w/ options API', () => {
         expectType<number>(this.c)
         // computed
         expectType<number>(this.d)
+        // computed get/set
+        expectType<number>(this.e)
+      },
+      returnSomething() {
+        return this.a
       }
     },
     render() {
@@ -304,6 +328,10 @@ describe('type inference w/ options API', () => {
       expectType<number>(this.c)
       // computed
       expectType<number>(this.d)
+      // computed get/set
+      expectType<number>(this.e)
+      // method
+      expectType<() => number | undefined>(this.returnSomething)
     }
   })
 })
@@ -619,7 +647,7 @@ describe('emits', () => {
   defineComponent({
     emits: {
       click: (n: number) => typeof n === 'number',
-      input: (b: string) => null
+      input: (b: string) => b.length > 1
     },
     setup(props, { emit }) {
       emit('click', 1)
@@ -669,4 +697,24 @@ describe('emits', () => {
       expectError(this.$emit('nope'))
     }
   })
+
+  // without emits
+  defineComponent({
+    setup(props, { emit }) {
+      emit('test', 1)
+      emit('test')
+    }
+  })
+
+  // emit should be valid when ComponentPublicInstance is used.
+  const instance = {} as ComponentPublicInstance
+  instance.$emit('test', 1)
+  instance.$emit('test')
+})
+
+describe('componentOptions setup should be `SetupContext`', () => {
+  expect<ComponentOptions['setup']>({} as (
+    props: Record<string, any>,
+    ctx: SetupContext
+  ) => any)
 })

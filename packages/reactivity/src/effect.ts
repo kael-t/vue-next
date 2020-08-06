@@ -30,7 +30,7 @@ const targetMap = new WeakMap<any, KeyToDepMap>()
 export interface ReactiveEffect<T = any> {
   // 代表这是一个函数类型，接受任意入参，返回结果类型为泛型T
   // T也即是原始函数的返回结果类型
-  (...args: any[]): T
+  (): T
   // 是否为effect的标志
   _isEffect: true
   id: number
@@ -45,8 +45,6 @@ export interface ReactiveEffect<T = any> {
 export interface ReactiveEffectOptions {
   // 是否延迟计算
   lazy?: boolean
-  // 是否计算属性
-  computed?: boolean
   // 调度器函数，接受的入参run即是传给effect的函数，如果传了scheduler，则可通过其调用监听函数。
   // 调度器方法允许开发者自己定义触发视图更新的逻辑, 而不是每次值变更时都触发视图更新
   scheduler?: (job: ReactiveEffect) => void
@@ -132,14 +130,14 @@ let uid = 0
 
 // 创建监听函数的方法
 function createReactiveEffect<T = any>(
-  fn: (...args: any[]) => T,
+  fn: () => T,
   options: ReactiveEffectOptions
 ): ReactiveEffect<T> {
   // 创建监听函数
-  const effect = function reactiveEffect(...args: unknown[]): unknown {
-    // 如果effect在不使用状态的话, 判断是否传了调度方法, 传了的话返回undefined, 没传的调用回调方法并返回结果
+  const effect = function reactiveEffect(): unknown {
+  // 如果effect在不使用状态的话, 判断是否传了调度方法, 传了的话返回undefined, 没传的调用回调方法并返回结果
     if (!effect.active) {
-      return options.scheduler ? undefined : fn(...args)
+      return options.scheduler ? undefined : fn()
     }
     /**
      * effect嵌套effect的问题, 维护了一个简易的runtime状态栈
@@ -166,7 +164,7 @@ function createReactiveEffect<T = any>(
         enableTracking()
         effectStack.push(effect)
         activeEffect = effect
-        return fn(...args)
+        return fn()
       } finally {
         effectStack.pop()
         resetTracking()
@@ -270,26 +268,10 @@ export function trigger(
 
   // 记录待执行的effect的Set(用的Set数据结构, 所以可以保证相同的effect不会重复执行)
   const effects = new Set<ReactiveEffect>()
-  const computedRunners = new Set<ReactiveEffect>()
-  // 把effect(回调方法)加入对应的Set中(普通effectSet和计算属性Set)
+  // 把effect(回调方法)加入对应的Set中(普通effectSet和计算属性Set), FIXME: 之前是要区分是computed还是普通reactive, 现在不用了, 为什么?
   const add = (effectsToAdd: Set<ReactiveEffect> | undefined) => {
     if (effectsToAdd) {
-      effectsToAdd.forEach(effect => {
-        // effect不是当前执行中的effect 或者 不需要跟踪的话
-        if (effect !== activeEffect || !shouldTrack) {
-          // 如果是计算属性则加到计算属性Set, 否则加入effects Set
-          if (effect.options.computed) {
-            computedRunners.add(effect)
-          } else {
-            effects.add(effect)
-          }
-        } else {
-          // the effect mutated its own dependency during its execution.
-          // this can be caused by operations like foo.value++
-          // do not trigger or we end in an infinite loop
-          // effect方法内部执行修改了自己的依赖的话(如: foo.value++, 此时activeEffect === effect)会导致死循环, vue的做法是不执行trigger
-        }
-      })
+      effectsToAdd.forEach(effect => effects.add(effect))
     }
   }
 
@@ -356,16 +338,6 @@ export function trigger(
       effect()
     }
   }
-  // Important: computed effects must be run first so that computed getters
-  // can be invalidated before any normal effects that depend on them are run.
-  /**
-   * 这里computedRunners要先于effects执行是因为:
-   * 因为computedEffect是惰性求值的, 如果effects中依赖到了computed的属性, 而effects先于computeRunners执行的话
-   * 就会导致computed属性在被effects依赖到了, 所以执行effect时调用了computed的getter, 导致computed属性求值了
-   * 然后再执行computedRunner, 这时候effect依赖到的computed属性又dirty了, 导致effect求值结果出错了
-   */
-  // 运行计算属性的监听方法
-  computedRunners.forEach(run)
-  // 运行正常的监听方法
+  // FIXME: 为什么不要computedEffect了??
   effects.forEach(run)
 }

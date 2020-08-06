@@ -10,7 +10,6 @@ import {
   SimpleExpressionNode,
   createCallExpression,
   createFunctionExpression,
-  ElementTypes,
   createObjectExpression,
   createObjectProperty,
   ForCodegenNode,
@@ -55,9 +54,14 @@ export const transformFor = createStructuralDirectiveTransform(
         forNode.source
       ]) as ForRenderListExpression
       const keyProp = findProp(node, `key`)
-      const fragmentFlag = keyProp
-        ? PatchFlags.KEYED_FRAGMENT
-        : PatchFlags.UNKEYED_FRAGMENT
+      const isStableFragment =
+        forNode.source.type === NodeTypes.SIMPLE_EXPRESSION &&
+        forNode.source.isConstant
+      const fragmentFlag = isStableFragment
+        ? PatchFlags.STABLE_FRAGMENT
+        : keyProp
+          ? PatchFlags.KEYED_FRAGMENT
+          : PatchFlags.UNKEYED_FRAGMENT
       forNode.codegenNode = createVNodeCall(
         context,
         helper(FRAGMENT),
@@ -67,7 +71,7 @@ export const transformFor = createStructuralDirectiveTransform(
         undefined,
         undefined,
         true /* isBlock */,
-        true /* isForBlock */,
+        !isStableFragment /* disableTracking */,
         node.loc
       ) as ForCodegenNode
 
@@ -76,8 +80,27 @@ export const transformFor = createStructuralDirectiveTransform(
         let childBlock: BlockCodegenNode
         const isTemplate = isTemplateNode(node)
         const { children } = forNode
+
+        // check <template v-for> key placement
+        if ((__DEV__ || !__BROWSER__) && isTemplate) {
+          node.children.some(c => {
+            if (c.type === NodeTypes.ELEMENT) {
+              const key = findProp(c, 'key')
+              if (key) {
+                context.onError(
+                  createCompilerError(
+                    ErrorCodes.X_V_FOR_TEMPLATE_KEY_PLACEMENT,
+                    key.loc
+                  )
+                )
+                return true
+              }
+            }
+          })
+        }
+
         const needFragmentWrapper =
-          children.length > 1 || children[0].type !== NodeTypes.ELEMENT
+          children.length !== 1 || children[0].type !== NodeTypes.ELEMENT
         const slotOutlet = isSlotOutlet(node)
           ? node
           : isTemplate &&
@@ -122,9 +145,11 @@ export const transformFor = createStructuralDirectiveTransform(
           // but mark it as a block.
           childBlock = (children[0] as PlainElementNode)
             .codegenNode as VNodeCall
-          childBlock.isBlock = true
-          helper(OPEN_BLOCK)
-          helper(CREATE_BLOCK)
+          childBlock.isBlock = !isStableFragment
+          if (childBlock.isBlock) {
+            helper(OPEN_BLOCK)
+            helper(CREATE_BLOCK)
+          }
         }
 
         renderExp.arguments.push(createFunctionExpression(
@@ -176,7 +201,7 @@ export function processFor(
     keyAlias: key,
     objectIndexAlias: index,
     parseResult,
-    children: node.tagType === ElementTypes.TEMPLATE ? node.children : [node]
+    children: isTemplateNode(node) ? node.children : [node]
   }
 
   context.replaceNode(forNode)

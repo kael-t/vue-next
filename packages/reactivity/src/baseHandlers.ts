@@ -71,19 +71,18 @@ const arrayInstrumentations: Record<string, Function> = {}
 // shallowReadonlyGet:  isReadonly->true  shallow->true
 function createGetter(isReadonly = false, shallow = false) {
   return function get(target: object, key: string | symbol, receiver: object) {
-    // 当前取值是否为__v_isReactive/__v_raw/__v_isReadonly
-    if (key === ReactiveFlags.isReactive) {
+    if (key === ReactiveFlags.IS_REACTIVE) {
       // __v_isReadonly为false的话则为响应式
       return !isReadonly
-    } else if (key === ReactiveFlags.isReadonly) {
+    } else if (key === ReactiveFlags.IS_READONLY) {
       // 返回__v_isReadonly的值
       return isReadonly
     } else if (
-      key === ReactiveFlags.raw &&
+      key === ReactiveFlags.RAW &&
       receiver ===
         (isReadonly
-          ? (target as any).__v_readonly
-          : (target as any).__v_reactive)
+          ? (target as any)[ReactiveFlags.READONLY]
+          : (target as any)[ReactiveFlags.REACTIVE])
     ) {
       // 返回原值
       return target
@@ -98,8 +97,12 @@ function createGetter(isReadonly = false, shallow = false) {
     // 其余直接去目标对象上的对应的值
     const res = Reflect.get(target, key, receiver)
 
-    // 如果key是js内置的Symbols或者__proto__属性, 则取原生的, 也就是说vue不会收集builtInSymbols的依赖
-    if ((isSymbol(key) && builtInSymbols.has(key)) || key === '__proto__') {
+    // 如果key是js内置的Symbols或者__proto__或者__v_isRef属性, 则取原生的, 也就是说vue不会收集builtInSymbols的依赖
+    if (
+      isSymbol(key)
+        ? builtInSymbols.has(key)
+        : key === `__proto__` || key === `__v_isRef`
+    ) {
       return res
     }
 
@@ -191,7 +194,9 @@ function deleteProperty(target: object, key: string | symbol): boolean {
 // 主要针对in操作符的代理方法
 function has(target: object, key: string | symbol): boolean {
   const result = Reflect.has(target, key)
-  track(target, TrackOpTypes.HAS, key)
+  if (!isSymbol(key) || !builtInSymbols.has(key)) {
+    track(target, TrackOpTypes.HAS, key)
+  }
   return result
 }
 

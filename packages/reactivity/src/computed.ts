@@ -2,6 +2,7 @@ import { effect, ReactiveEffect, trigger, track } from './effect'
 import { TriggerOpTypes, TrackOpTypes } from './operations'
 import { Ref } from './ref'
 import { isFunction, NOOP } from '@vue/shared'
+import { ReactiveFlags } from './reactive'
 
 export interface ComputedRef<T = any> extends WritableComputedRef<T> {
   readonly value: T
@@ -54,10 +55,6 @@ export function computed<T>(
   const runner = effect(getter, {
     // 延迟计算
     lazy: true,
-    // mark effect as computed so that it gets priority during trigger
-    // 标识为computed来确定触发时候的优先级
-    // 详情可以看effect.ts, 在trigger的时候, 标识为computed的会先于普通的effect执行
-    computed: true,
     // 调度函数, 所有跟这个computed有关的依赖变更, 都会调用一次这个方法
     // 使得这个computed的dirty=true, 然后每次调用computed的getter时检测dirty
     // 一旦dirty为true, 则调用getter更新computed的值, computed的求值是惰性的, 跟vue2.x一致
@@ -77,6 +74,9 @@ export function computed<T>(
   })
   computed = {
     __v_isRef: true,
+    [ReactiveFlags.IS_READONLY]:
+      isFunction(getterOrOptions) || !getterOrOptions.set,
+
     // expose effect so computed can be stopped
     effect: runner,
     get value() {

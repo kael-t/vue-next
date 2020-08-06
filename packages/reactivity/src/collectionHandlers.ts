@@ -183,6 +183,19 @@ function createForEach(isReadonly: boolean, shallow: boolean) {
   }
 }
 
+interface Iterable {
+  [Symbol.iterator](): Iterator
+}
+
+interface Iterator {
+  next(value?: any): IterationResult
+}
+
+interface IterationResult {
+  value: any
+  done: boolean
+}
+
 // 创建keys/values/entries迭代器方法
 // 以上高阶方法中callback中拿到的参数都是响应式版本的
 // 也就是说 new Map([['a', 1]]).values(item => item = 2)这种写法是能直接触发effect的
@@ -191,7 +204,10 @@ function createIterableMethod(
   isReadonly: boolean,
   shallow: boolean
 ) {
-  return function(this: IterableCollections, ...args: unknown[]) {
+  return function(
+    this: IterableCollections,
+    ...args: unknown[]
+  ): Iterable & Iterator {
     // 获取调用者的原值
     const target = toRaw(this)
     const isMap = target instanceof Map
@@ -329,11 +345,11 @@ function createInstrumentationGetter(isReadonly: boolean, shallow: boolean) {
     key: string | symbol,
     receiver: CollectionTypes
   ) => {
-    if (key === ReactiveFlags.isReactive) {
+    if (key === ReactiveFlags.IS_REACTIVE) {
       return !isReadonly
-    } else if (key === ReactiveFlags.isReadonly) {
+    } else if (key === ReactiveFlags.IS_READONLY) {
       return isReadonly
-    } else if (key === ReactiveFlags.raw) {
+    } else if (key === ReactiveFlags.RAW) {
       return target
     }
 

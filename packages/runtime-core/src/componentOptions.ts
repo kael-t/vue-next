@@ -4,7 +4,8 @@ import {
   SetupContext,
   ComponentInternalOptions,
   PublicAPIComponent,
-  Component
+  Component,
+  InternalRenderFunction
 } from './component'
 import {
   isFunction,
@@ -105,7 +106,6 @@ export interface ComponentOptionsBase<
   components?: Record<string, PublicAPIComponent>
   directives?: Record<string, Directive>
   inheritAttrs?: boolean
-  inheritRef?: boolean
   emits?: E | EE[]
 
   // Internal ------------------------------------------------------------------
@@ -119,7 +119,13 @@ export interface ComponentOptionsBase<
   ssrRender?: (
     ctx: any,
     push: (item: any) => void,
-    parentInstance: ComponentInternalInstance
+    parentInstance: ComponentInternalInstance,
+    attrs: Data | undefined,
+    // for compiler-optimized bindings
+    $props: ComponentInternalInstance['props'],
+    $setup: ComponentInternalInstance['setupState'],
+    $data: ComponentInternalInstance['data'],
+    $options: ComponentInternalInstance['ctx']
   ) => void
 
   /**
@@ -260,7 +266,7 @@ export type ExtractComputedReturns<T extends any> = {
 type WatchOptionItem =
   | string
   | WatchCallback
-  | { handler: WatchCallback } & WatchOptions
+  | { handler: WatchCallback | string } & WatchOptions
 
 type ComponentWatchOptionItem = WatchOptionItem | WatchOptionItem[]
 
@@ -316,6 +322,9 @@ interface LegacyOptions<
   renderTracked?: DebuggerHook
   renderTriggered?: DebuggerHook
   errorCaptured?: ErrorCapturedHook
+
+  // runtime compile only
+  delimiters?: [string, string]
 }
 
 export type OptionTypesKeys = 'P' | 'B' | 'D' | 'C' | 'M'
@@ -355,6 +364,8 @@ function createDuplicateChecker() {
 
 type DataFn = (vm: ComponentPublicInstance) => any
 
+export let isInBeforeCreate = false
+
 export function applyOptions(
   instance: ComponentInternalInstance,
   options: ComponentOptions,
@@ -373,9 +384,6 @@ export function applyOptions(
     watch: watchOptions,
     provide: provideOptions,
     inject: injectOptions,
-    // assets
-    components,
-    directives,
     // lifecycle
     beforeMount,
     mounted,
@@ -385,6 +393,7 @@ export function applyOptions(
     deactivated,
     beforeUnmount,
     unmounted,
+    render,
     renderTracked,
     renderTriggered,
     errorCaptured
@@ -393,14 +402,20 @@ export function applyOptions(
   const publicThis = instance.proxy!
   const ctx = instance.ctx
   const globalMixins = instance.appContext.mixins
-  // call it only during dev
+
+  if (asMixin && render && instance.render === NOOP) {
+    instance.render = render as InternalRenderFunction
+  }
 
   // applyOptions is called non-as-mixin once per instance
   if (!asMixin) {
+    isInBeforeCreate = true
     callSyncHook('beforeCreate', options, publicThis, globalMixins)
+    isInBeforeCreate = false
     // global mixins are applied first
     applyMixins(instance, globalMixins, deferredData, deferredWatch)
   }
+
   // extending a base component...
   if (extendsOptions) {
     applyOptions(instance, extendsOptions, deferredData, deferredWatch, true)
@@ -562,14 +577,6 @@ export function applyOptions(
     }
   }
 
-  // asset options
-  if (components) {
-    extend(instance.components, components)
-  }
-  if (directives) {
-    extend(instance.directives, directives)
-  }
-
   // lifecycle options
   if (!asMixin) {
     callSyncHook('created', options, publicThis, globalMixins)
@@ -697,7 +704,14 @@ function createWatcher(
     if (isArray(raw)) {
       raw.forEach(r => createWatcher(r, ctx, publicThis, key))
     } else {
-      watch(getter, raw.handler.bind(publicThis), raw)
+      const handler = isFunction(raw.handler)
+        ? raw.handler.bind(publicThis)
+        : (ctx[raw.handler] as WatchCallback)
+      if (isFunction(handler)) {
+        watch(getter, handler, raw)
+      } else if (__DEV__) {
+        warn(`Invalid watch handler specified by key "${raw.handler}"`, handler)
+      }
     }
   } else if (__DEV__) {
     warn(`Invalid watch option: "${key}"`)
@@ -723,9 +737,8 @@ export function resolveMergedOptions(
 function mergeOptions(to: any, from: any, instance: ComponentInternalInstance) {
   const strats = instance.appContext.config.optionMergeStrategies
   for (const key in from) {
-    const strat = strats && strats[key]
-    if (strat) {
-      to[key] = strat(to[key], from[key], instance.proxy, key)
+    if (strats && hasOwn(strats, key)) {
+      to[key] = strats[key](to[key], from[key], instance.proxy, key)
     } else if (!hasOwn(to, key)) {
       to[key] = from[key]
     }
