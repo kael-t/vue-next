@@ -10,12 +10,16 @@
 <body>
   <div id="app"></div>
   <script>
-    console.log(Vue);
+    console.log(Vue)
     const App = {
       template: `
         <p>{{count}} {{}}</p>
         <button @click="handleClick">+1</button>
         <span>{{obj.b}}</span>
+        <button @click="testCount">throttle</button>
+        <span>{{throttleCount}}</span>
+        <button @click="triggerFunc">trigger</button>
+        <div>{{saveRef}}</div>
       `,
       data() {
         return {
@@ -27,11 +31,64 @@
         }
       },
       setup() {
+        const customRef = () => {
+          // 用customRef来实现throttle
+          const myRef = (value) => Vue.customRef((track, trigger) => ({
+            get: function () {
+                track()
+                return value;
+            },
+            set: function (newValue) {
+                setTimeout(() => {
+                  value = newValue
+                  trigger()
+                }, 2000)
+            }
+          }))
+          let throttleCount = myRef(0);
+          const testCount = () => {
+            throttleCount.value++
+          }
+          return {
+            throttleCount,
+            testCount,
+          }
+        }
+        const customRef2 = () => {
+          // 内部数据每秒+1, 当调用triggerFunc时才更新视图
+          let _trigger = () => console.log('trigger');
+          const triggerFunc = () => _trigger()
+          const myRef = (value) => Vue.customRef((track, trigger) => ({
+            get: function () {
+              track()
+              return value;
+            },
+            set: function (newValue) {
+              // 缓存trigger方法
+              value = newValue
+              _trigger = trigger
+            }
+          }))
+          const saveRef = myRef(0)
+          setInterval(() => {
+            saveRef.value++
+          }, 1000)
+          return {
+            saveRef,
+            triggerFunc,
+          }
+        }
         let dummy
         const map = Vue.reactive(new Map())
-        Vue.effect(() => (dummy = map.customProp))
+        Vue.watchEffect(() => (dummy = map.customProp))
         map.customProp = 'Hello World'
-        console.log(map)
+        const sym = Vue.ref(Symbol.observable)
+        console.log(sym)
+        console.log(Vue.unref(sym))
+        return {
+          ...customRef(),
+          ...customRef2(),
+        }
       },
       computed: {
         test1 () {
@@ -41,10 +98,10 @@
       methods: {
         handleClick() {
           this.count += 1;
-        }
+        },
       }
     }
-    let vm = Vue.createApp().mount(App, '#app')
+    let vm = Vue.createApp(App).mount('#app')
   </script>
 </body>
 </html>

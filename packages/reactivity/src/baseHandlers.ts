@@ -26,7 +26,8 @@ const builtInSymbols = new Set(
   // 9: Symbol(Symbol.split)
   // 10: Symbol(Symbol.toPrimitive)
   // 11: Symbol(Symbol.toStringTag)
-  // 12: Symbol(Symbol.unscopables
+  // 12: Symbol(Symbol.unscopables)
+  // 13: Symbol(observable) 新加的..
   Object.getOwnPropertyNames(Symbol)
     .map(key => (Symbol as any)[key])
     .filter(isSymbol)

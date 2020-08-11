@@ -125,8 +125,11 @@ export type CustomRefFactory<T> = (
  *        return value;
  *    },
  *    set: function (newValue) {
- *        console.log(set)
- *        setTimeout(() => trigger(), 200)
+ *        console.log('set')
+ *        setTimeout(() => {
+ *          value = newValue
+ *          trigger()
+ *        }, 200)
  *    }
  * }))
  */
