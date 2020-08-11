@@ -6,7 +6,13 @@ import { EMPTY_OBJ, isArray } from '@vue/shared'
 // which maintains a Set of subscribers, but we simply store them as
 // raw Sets to reduce memory overhead.
 /**
- * 把targetMap想想成一下结构
+ * 把targetMap想象成以下结构
+ * WeekMap() {
+ *    a => Map() {
+ *      key1 => Set() [effect1, effec2, effect3],
+ *      key2 => Set() [effect3, effect4]
+ *    }
+ * }
  * data: {
  *    a: [effect1, effec2, effect3],
  *    b: [effect3, effect4],

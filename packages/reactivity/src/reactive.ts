@@ -134,10 +134,9 @@ export function shallowReadonly<T extends object>(
 /**
  * 创建响应式对象, readonly和reactive都是调用的这个函数, 只是他们的参数不同
  * @param target 目标对象
- * @param toProxy 响应式对象存储的weakMap
- * @param toRaw 原值存储的weakMap
- * @param baseHandlers
- * @param collectionHandlers
+ * @param isReadonly 是否为只读
+ * @param baseHandlers 基本类型的proxy的trap
+ * @param collectionHandlers collection类型(Map,Set,WeekMap,WeekSet)的proxy的trap
  */
 function createReactiveObject(
   target: Target,
@@ -182,7 +181,6 @@ function createReactiveObject(
 }
 
 // value是否为响应式的(先看下__v_isReadonly是true还是false, true的话看下value原值是否是响应式的, false的话直接返回value的__v_isReactive标志)
-// TODO: 对响应式对象设置readonly代理?? 对readonly对象再做readonly代理??? 千层塔???
 export function isReactive(value: unknown): boolean {
   if (isReadonly(value)) {
     return isReactive((value as Target)[ReactiveFlags.RAW])

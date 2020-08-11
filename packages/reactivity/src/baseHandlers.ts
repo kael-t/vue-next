@@ -48,14 +48,21 @@ const arrayInstrumentations: Record<string, Function> = {}
     }
     // we run the method using the original args first (which may be reactive)
     // 用原参数调用一次指定的方法, 如果返回的查找失败的话, 对参数进行toRaw后再调用指定方法一次
-    // TODO: 考虑传入的参数已经是reactive或者ref的情况?
-    // FIXME: 猜测: 假如数组中包含customRef并设置getter返回值为-1/false的情况, 则无论该Ref值为什么返回的都是是查找失败
-    //             如[1, customRef(2), 3], 其中customRef(2)的getter被设置为return -1
     const res = arr[key](...args)
     if (res === -1 || res === false) {
       // 防止上面方法接收到的参数是Reactive的情况
       // 如果参数是Reactive的, 但数组上的不是, 可能会出现查找失败的问题
-      // 如: [1,2,3,4].includes(Ref(4))
+      /**
+       * 传入的参数已经是reactive的情况, 如:
+       * const srcObj = { a: 1 }
+       * const reactiveObj = Vue.reactive(srcObj)
+       * const arr = Vue.reactive([1,2,srcObj,4,5])
+       * Vue.watchEffect(() => {
+       *   console.log(arr.indexOf(reactiveObj))
+       * })
+       * 
+       * srcObj !== reactiveObj, 但是以上代码能查找成功
+       */
       // if that didn't work, run it again using raw values.
       return arr[key](...args.map(toRaw))
     } else {
