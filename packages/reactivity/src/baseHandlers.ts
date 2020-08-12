@@ -38,6 +38,7 @@ const shallowGet = /*#__PURE__*/ createGetter(false, true)
 const readonlyGet = /*#__PURE__*/ createGetter(true)
 const shallowReadonlyGet = /*#__PURE__*/ createGetter(true, true)
 
+// 与查找相关的非高阶方法
 const arrayInstrumentations: Record<string, Function> = {}
 ;['includes', 'indexOf', 'lastIndexOf'].forEach(key => {
   arrayInstrumentations[key] = function(...args: any[]): any {
@@ -71,8 +72,8 @@ const arrayInstrumentations: Record<string, Function> = {}
   }
 })
 
-// 创建getter方法, 通过闭包分别报错了isReadonly和shallow的值
-// shallow的true和false表明是浅响应还是响应式, 浅响应的话, 深层对象改变不会被收集
+// 创建getter方法, 通过闭包分别保存了isReadonly和shallow的值
+// shallow的true和false表明是浅响应还是响应式, 浅响应的话, 深层对象改变不会被监听
 // get: isReadonly->false  shallow->false
 // shallowGet:  isReadonly->false  shallow->true
 // readonlyGet:  isReadonly->true  shallow->false
@@ -135,6 +136,7 @@ function createGetter(isReadonly = false, shallow = false) {
       // Convert returned value into a proxy as well. we do the isObject check
       // here to avoid invalid value warning. Also need to lazy access readonly
       // and reactive here to avoid circular dependency.
+      // TODO: 循环依赖的情形? isObject(Proxy)为真, 所以会对Proxy对象再加代理?
       return isReadonly ? readonly(res) : reactive(res)
     }
 
